@@ -4,7 +4,7 @@
 // הקובץ רץ ב־Web Worker (anatomy-worker.js), כדי שהדף לא ייתקע בזמן הבנייה.
 
 import {
-  JOINT, FINGERS, VERTEBRAE, spineZ, HEAD, EYES, BRAIN, HEART, STOMACH, DUODENUM, COLON, KIDNEYS, BLADDER, LIVER,
+  JOINT, FINGERS, VERTEBRAE, spineZ, HEAD, EYES, BRAIN, HEART, STOMACH, DUODENUM, COLON, KIDNEYS, BLADDER, LIVER, GALLBLADDER,
 } from './body-plan.js';
 
 // ---------- מתמטיקה ----------
@@ -541,122 +541,348 @@ function legBones(G, s) {
 }
 
 // ---------- האיברים ----------
-function brain(G) {
-  const R = BRAIN.r;
-  G.add(ellipsoid(BRAIN.c, R));
-  // הסדק בין שתי ההמיספרות
-  G.map((v, x, y) => (y > BRAIN.c[1] - 0.025 ? smax(v, 0.0028 - Math.abs(x), 0.002) : v));
-  // הקפלים: תלמים לאורך הקווים שבהם הרעש עובר דרך אפס
-  G.map((v, x, y, z) => {
-    if (Math.abs(v) > 0.008) return v;
-    const nn = noise(x * 55 + 3, y * 55, z * 55) + 0.5 * noise(x * 110, y * 110 + 7, z * 110);
-    return v + 0.0032 * sstep(0.72, 1, 1 - Math.abs(nn));
-  });
-  // המוח הקטן וגזע המוח
-  const cb = ellipsoid([0, 1.607, -0.058], [0.048, 0.026, 0.034]);
-  G.add(cb, 0.006);
-  G.map((v, x, y, z) => (cb.d(x, y, z) < 0.004 && y < 1.625 ? v + 0.0012 * (0.5 + 0.5 * Math.sin(y * 900)) : v), [-0.06, 1.57, -0.1, 0.06, 1.64, -0.02]);
-  G.add(cone([0, 1.63, -0.03], [0, 1.52, -0.034], 0.013, 0.01), 0.008);
+// צבעים נכתבים כמו בתוכנת ציור (sRGB) ונשמרים לינאריים, כי כך three.js קורא צבע לכל נקודה
+const C = (r, g, b) => [r ** 2.2, g ** 2.2, b ** 2.2];
+const RED = C(0.84, 0.13, 0.12), BLUE = C(0.3, 0.36, 0.76), FAT = C(0.97, 0.84, 0.5);
+
+// כתמים עדינים: מעבר בין שני גוונים לפי רעש בשתי רמות פירוט
+const mottle = (a, b, f) => (x, y, z) => lerp3(a, b, clamp(0.5 + 0.45 * noise(x * f, y * f, z * f) + 0.3 * noise(x * f * 2.7 + 5, y * f * 2.7, z * f * 2.7), 0, 1));
+
+// צבע בשכבות: על צבע הבסיס נצבעות שכבות [צורות, צבע], כל שכבה רק במרחק w מפני הצורות שלה
+function paint(base, layers, w) {
+  return (x, y, z) => {
+    let c = typeof base === 'function' ? base(x, y, z) : base;
+    for (const [shapes, col] of layers) {
+      let d = FAR;
+      for (const s of shapes) {
+        const b = s.box;
+        if (x > b[0] - w && x < b[3] + w && y > b[1] - w && y < b[4] + w && z > b[2] - w && z < b[5] + w) d = Math.min(d, s.d(x, y, z));
+      }
+      if (d < w) c = lerp3(c, col, 1 - sstep(0, w, d));
+    }
+    return c;
+  };
 }
 
+// הנקודה שבה קרן מ־o (בתוך הצורה) בכיוון dir יוצאת מפני השטח של d (חיפוש בינארי)
+function onSurface(d, o, dir, far = 0.08) {
+  let a = 0, b = far;
+  for (let i = 0; i < 22; i++) {
+    const m = (a + b) / 2;
+    if (d(...add3(o, mul3(dir, m))) < 0) a = m;
+    else b = m;
+  }
+  return add3(o, mul3(dir, a));
+}
+
+// כלי דם גדול שנחתך בקצה b חיתוך ישר, עם החור שבאמצע (כמו באטלס)
+function vesselEnd(G, a, b, r) {
+  const n = norm3(sub3(b, a));
+  G.add(cone(a, add3(b, mul3(n, r)), r), 0.004);
+  G.map((v, x, y, z) => {
+    const p = sub3([x, y, z], b), h = dot3(p, n);
+    const rad = Math.hypot(p[0] - n[0] * h, p[1] - n[1] * h, p[2] - n[2] * h);
+    return rad > r * 1.3 ? v : Math.max(v, h, Math.min(r * 0.72 - rad, h + 0.006));
+  }, [b[0] - r * 2.2, b[1] - r * 2.2, b[2] - r * 2.2, b[0] + r * 2.2, b[1] + r * 2.2, b[2] + r * 2.2]);
+}
+
+// ---------- הלב ----------
+// הצירים של הלב: X אל החוד (שמאלה, למטה וקדימה), Y – הפנים הקדמיות, Z – הצד הימני־תחתון
+const HR = basis(sub3(HEART.apex, HEART.c), [0, 0, 1]);
+const hw = (X, Y, Z) => add3(HEART.c, add3(add3(mul3(HR[0], X), mul3(HR[1], Y)), mul3(HR[2], Z)));
+
 function heartShapes() {
-  const c = HEART.c;
-  const down = norm3(sub3(HEART.apex, c));
-  const R = basis([1, 0, 0.2], mul3(down, -1));
-  const w = (p) => add3(c, [R[0][0] * p[0] + R[1][0] * p[1] + R[2][0] * p[2], R[0][1] * p[0] + R[1][1] * p[1] + R[2][1] * p[2], R[0][2] * p[0] + R[1][2] * p[1] + R[2][2] * p[2]]);
-  // שני חדרים גדולים למטה (החדר הימני בולט קדימה), שתי עליות למעלה, וחוד שפונה שמאלה ולמטה
   return [
-    cone(w([0.006, 0.008, 0]), w([0.004, -0.05, 0.004]), 0.034, 0.01),
-    cone(w([-0.012, 0.004, 0.014]), w([-0.002, -0.042, 0.012]), 0.03, 0.012),
-    sphere(w([0.024, 0.03, -0.014]), 0.024),
-    sphere(w([-0.026, 0.026, -0.006]), 0.026),
+    cone(hw(-0.012, -0.012, -0.01), hw(0.062, -0.002, -0.004), 0.031, 0.011), // חדר שמאל, עד החוד
+    cone(hw(-0.01, 0.012, 0.014), hw(0.048, 0.01, 0.006), 0.029, 0.012), // חדר ימין, מלפנים
+    ellipsoid(hw(-0.03, 0.0, 0.03), [0.022, 0.022, 0.02], HR), // עלייה ימנית
+    ellipsoid(hw(-0.04, -0.018, -0.008), [0.018, 0.016, 0.03], HR), // עלייה שמאלית, מאחור
+    ellipsoid(hw(-0.03, 0.022, 0.018), [0.01, 0.007, 0.016], HR), // אוזנית ימנית, ליד שורש אבי העורקים
+    ellipsoid(hw(-0.026, 0.006, -0.03), [0.01, 0.007, 0.015], HR), // אוזנית שמאלית
   ];
 }
 
+// עורקים וורידים על פני הלב, ושומן צהוב בתלמים שלהם
+const HEART_SURFACE = (() => {
+  const S = heartShapes();
+  const d = (x, y, z) => S.reduce((v, s) => smin(v, s.d(x, y, z), 0.012), FAR);
+  // מסלול [X, זווית, רדיוס] (זווית 0 = קדימה, π/2 = ימינה־למטה, π = אחורה): מחליקים קודם, ואז מורידים כל נקודה
+  // אל פני הלב, כדי שהצינור יצמד לשטח לכל אורכו. inset > 0 שוקע פנימה, < 0 יושב מעל (על השומן)
+  const path = (list, inset) => {
+    const pts = smoothPath(list, 4).map(([X, a, r]) => {
+      const dir = add3(mul3(HR[1], Math.cos(a)), mul3(HR[2], Math.sin(a)));
+      return [...sub3(onSurface(d, hw(X, -0.004, 0.002), dir, 0.06), mul3(dir, inset)), r];
+    });
+    return pts.slice(1).map((p, i) => cone(pts[i].slice(0, 3), p.slice(0, 3), pts[i][3], p[3]));
+  };
+  const ring = (X, a0, a1, r, inset) => path(Array.from({ length: 7 }, (_, i) => [X, a0 + ((a1 - a0) * i) / 6, r]), inset);
+  return {
+    fat: [
+      ...ring(-0.018, -2.4, 2.6, 0.005, 0.0015),
+      ...path([[-0.016, -0.75, 0.005], [0.005, -0.8, 0.0045], [0.03, -0.8, 0.0035], [0.05, -0.76, 0.0022]], 0.0015),
+      ...path([[-0.016, 1.45, 0.0045], [0.01, 1.35, 0.0035], [0.03, 1.25, 0.0022]], 0.0013),
+    ],
+    arteries: [
+      ...ring(-0.019, 0.25, 2.7, 0.0022, -0.0018), // העורק הכלילי הימני
+      ...ring(-0.019, -0.45, -2.3, 0.002, -0.0018), // הענף הסובב
+      ...path([[-0.019, -0.55, 0.0024], [-0.006, -0.72, 0.0022], [0.015, -0.78, 0.002], [0.035, -0.78, 0.0017], [0.055, -0.74, 0.0013], [0.066, -0.7, 0.001]], -0.0014), // היורד הקדמי
+      ...path([[0.008, -0.8, 0.0016], [0.022, -1.05, 0.0015], [0.036, -1.3, 0.0012], [0.05, -1.5, 0.001]], -0.0003),
+      ...path([[-0.017, 1.45, 0.0018], [0.005, 1.38, 0.0016], [0.025, 1.28, 0.0013], [0.042, 1.15, 0.001]], -0.0008),
+    ],
+    veins: [
+      ...path([[0.05, -0.95, 0.0012], [0.03, -0.95, 0.0016], [0.008, -0.95, 0.0019], [-0.012, -1.0, 0.002], [-0.015, -1.4, 0.0021], [-0.015, -1.9, 0.0023], [-0.015, -2.4, 0.0024], [-0.016, -2.9, 0.0026]], -0.0012),
+      ...path([[0.03, 0.62, 0.0011], [0.012, 0.55, 0.0014], [-0.01, 0.5, 0.0016]], -0.0003),
+    ],
+  };
+})();
+
+// כלי הדם הגדולים שיוצאים מלמעלה: [התחלה, קצה, רדיוס]
+const AORTA = [[0.008, 1.262, 0.032], [0.011, 1.33, 0.037], 0.0125];
+const PULMONARY = [[0.022, 1.29, 0.046], [0.032, 1.33, 0.046], 0.012];
+const PULMONARY_LR = [[[0.034, 1.33, 0.044], [0.058, 1.336, 0.022], 0.0085], [[0.03, 1.333, 0.042], [0.012, 1.338, 0.017], 0.0085]];
+const SVC = [[-0.02, 1.272, 0.027], [-0.021, 1.326, 0.025], 0.0095];
+
+function heart(G) {
+  G.add(heartShapes(), 0.012);
+  G.map((v, x, y, z) => (Math.abs(v) > 0.003 ? v : v + 0.0005 * noise(x * 260, y * 260, z * 260))); // פני שטח לא חלקים לגמרי, כדי שהברק יישבר כמו על רקמה רטובה
+  G.add(HEART_SURFACE.fat, 0.004);
+  G.add([...HEART_SURFACE.arteries, ...HEART_SURFACE.veins], 0.0015);
+  G.add(sphere([0.009, 1.284, 0.035], 0.0145), 0.006); // התפיחות בשורש אבי העורקים
+  G.add(cone(...PULMONARY), 0.012); // יוצא מהחדר הימני כמו משפך
+  for (const v of [AORTA, ...PULMONARY_LR, SVC]) vesselEnd(G, ...v);
+}
+
+const heartColor = paint(mottle(C(0.55, 0.14, 0.12), C(0.4, 0.08, 0.09), 70), [
+  [heartShapes().slice(2), C(0.5, 0.13, 0.16)],
+  [HEART_SURFACE.fat, FAT],
+  [HEART_SURFACE.veins, BLUE],
+  [HEART_SURFACE.arteries, RED],
+  [[cone(...AORTA), sphere([0.009, 1.284, 0.035], 0.0145)], C(0.86, 0.24, 0.2)],
+  [[cone(lerp3(PULMONARY[0], PULMONARY[1], 0.45), PULMONARY[1], PULMONARY[2]), ...PULMONARY_LR.map((v) => cone(...v))], C(0.36, 0.44, 0.8)],
+  [[cone(...SVC)], C(0.33, 0.4, 0.78)],
+], 0.0014);
+
+// ---------- הריאות ----------
+// הסרעפת: כיפה מתחת לכל ריאה. הכיפה הימנית גבוהה יותר, כי הכבד דוחף אותה למעלה
+const dome = (s) => sphere([s * 0.08, s > 0 ? 1.018 : 1.03, 0.03], 0.15);
+
 function lungs(G) {
+  // ריאה צרה למעלה (הקודקוד מאחורי עצם הבריח) ורחבה למטה, כדי שתישאר בתוך הצלעות
   for (const s of MIRROR) {
-    const c = [s * 0.083, 1.295, -0.008];
-    const shape = [ellipsoid(c, [0.066, 0.13, 0.086]), ellipsoid([s * 0.072, 1.39, -0.01], [0.04, 0.05, 0.045])];
-    G.add(shape, 0.03);
+    const e = ellipsoid([0, 1.265, 0], [0.062, 0.16, 0.087]);
+    G.add({
+      d: (x, y, z) => {
+        const t = Math.max(0, y - 1.21), k = t * sstep(0, 0.04, t);
+        return e.d((x - s * (0.072 - 0.2 * k)) * (1 + 6 * k - 8 * t * t), y, (z + 0.006) * (1 + 4 * t * t));
+      },
+      box: [s > 0 ? 0 : -0.14, 1.1, -0.1, s > 0 ? 0.14 : 0, 1.44, 0.08],
+    });
   }
-  // בסיס קעור מעל הסרעפת, צד פנימי ישר, ומקום ללב
-  for (const s of MIRROR) G.sub(sphere([s * 0.083, 1.03, 0.0], 0.14), 0.01);
-  G.map((v, x) => smax(v, 0.018 - Math.abs(x), 0.01));
-  G.sub(heartShapes().map((h) => ({ d: (x, y, z) => h.d(x, y, z) - 0.008, box: h.box.map((b, i) => b + (i < 3 ? -0.008 : 0.008)) })), 0.01);
-  // סדקים בין האונות: שתיים בריאה הימנית, אחת בשמאלית
-  // רק חריץ על פני השטח (לא חיתוך דרך כל הריאה), כדי שלא ייווצרו מדרגות בתוך הריאה השקופה
-  const fissure = (s, p, nrm) => G.map((v, x, y, z) => (Math.sign(x) === s && v > -0.012 ? smax(v, Math.min(0.005 - Math.abs(dot3(sub3([x, y, z], p), nrm)), v + 0.012), 0.002) : v));
-  fissure(1, [0.08, 1.29, 0], norm3([0, 1, 0.9]));
-  fissure(-1, [-0.08, 1.31, 0], norm3([0, 1, 0.9]));
-  fissure(-1, [-0.08, 1.26, 0.05], norm3([0, 1, -0.3]));
+  G.sub(MIRROR.map(dome), 0.012);
+  G.map((v, x) => smax(v, 0.016 - Math.abs(x), 0.01)); // הצד הפנימי ישר
+  // מקום ללב ולכלי הדם הגדולים, גומה של הלב בריאה השמאלית, ושער הריאה שדרכו נכנסות הסימפונות
+  const room = [...heartShapes(), ...[AORTA, PULMONARY, SVC].map((v) => cone(...v))].map((h) => ({ d: (x, y, z) => h.d(x, y, z) - 0.008, box: h.box.map((b, i) => b + (i < 3 ? -0.008 : 0.008)) }));
+  G.sub([...room, sphere([0.05, 1.21, 0.075], 0.035)], 0.012);
+  G.sub(MIRROR.map((s) => ellipsoid([s * 0.03, 1.3, -0.014], [0.014, 0.032, 0.022])), 0.01);
+  // סדקים בין האונות: חריץ בצורת V רק ליד פני השטח, כדי שלא ייראו מדרגות בתוך הריאה השקופה
+  const fissure = (s, p, n, keep = () => true) => G.map((v, x, y, z) => {
+    if (Math.sign(x) !== s || v < -0.016 || v > 0.006 || !keep(x, y, z)) return v;
+    return v + 0.0055 * Math.max(0, 1 - Math.abs(dot3(sub3([x, y, z], p), n)) / 0.0045);
+  });
+  const oblique = (s) => [[0, s > 0 ? 1.255 : 1.24, 0], norm3([0, 1, s > 0 ? 1.3 : 1.2])];
+  for (const s of MIRROR) fissure(s, ...oblique(s));
+  const [po, no] = oblique(-1);
+  fissure(-1, [0, 1.3, 0], [0, 1, 0], (x, y, z) => dot3(sub3([x, y, z], po), no) > 0.002); // הסדק האופקי, רק באונה העליונה של הריאה הימנית
 }
 
+const lungBase = mottle(C(0.96, 0.67, 0.69), C(0.78, 0.6, 0.7), 45);
+// ורוד עם כתמים אפורים־סגולים וקווים דקים של אונוניות (התאים הקטנים של הריאה)
+function lungColor(x, y, z) {
+  const f = 75;
+  const X = x * f, Y = y * f, Z = z * f;
+  const xi = Math.floor(X), yi = Math.floor(Y), zi = Math.floor(Z);
+  let d1 = 9, d2 = 9;
+  for (let k = -1; k <= 1; k++) for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const a = xi + i, b = yi + j, c = zi + k;
+    const d = Math.hypot(a + hash(a, b, c) - X, b + hash(a + 71, b, c) - Y, c + hash(a, b + 37, c) - Z);
+    if (d < d1) [d1, d2] = [d, d1];
+    else if (d < d2) d2 = d;
+  }
+  return lerp3(lungBase(x, y, z), C(0.8, 0.5, 0.57), 0.55 * (1 - sstep(0.03, 0.16, d2 - d1)));
+}
+
+// ---------- המוח ----------
+// הפיתולים: 0 בתוך חריץ (לאורך הקווים שבהם רעש מעוות עובר דרך אפס) ו־1 בראש הפיתול. השורש נותן חריץ צר ופיתול מעוגל
+function gyri(x, y, z) {
+  const w = 0.006 * noise(x * 40 + 9, y * 40, z * 40);
+  return Math.sqrt(Math.min(1, Math.abs(noise((x + w) * 105, (y - w) * 105 + 3, z * 88)) / 0.45));
+}
+
+function cerebrum(G) {
+  const main = ellipsoid(BRAIN.c, BRAIN.r);
+  // בסיס שטוח שעולה קדימה (האונה המצחית יושבת מעל ארובות העיניים)
+  G.add({ d: (x, y, z) => smax(main.d(x, y, z), 1.643 + 0.12 * (z - 0.02) - y, 0.01), box: main.box });
+  // האונות הרקתיות בצדדים, למטה. החיבור החד ביניהן לבין שאר המוח הוא הסדק הצידי (של סילביוס)
+  G.add(MIRROR.map((s) => ellipsoid([s * 0.047, 1.642, 0.0], [0.047, 0.023, 0.026], basis([0, -0.22, 1], [0, 1, 0]))), 0.005);
+  // החריץ המרכזי: מקודקוד הראש למטה וקצת קדימה, בין אונת המצח לאונה הקודקודית
+  const cs = (s) => [[0.06, -0.014], [0.5, -0.009], [0.95, -0.001], [1.3, 0.009]].map(([a, z]) => [...onSurface(main.d, [0, 1.66, z], [s * Math.sin(a), Math.cos(a), 0]), 0.0021]);
+  G.sub(MIRROR.flatMap((s) => tube(cs(s), 0)), 0.0015);
+  // הסדק בין שתי ההמיספרות
+  G.map((v, x, y) => (y > BRAIN.c[1] - 0.03 ? smax(v, 0.0026 - Math.abs(x), 0.002) : v));
+  G.map((v, x, y, z) => (Math.abs(v) > 0.009 ? v : v + 0.002 - 0.004 * gyri(x, y, z)));
+}
+
+const cerebrumBase = mottle(C(0.94, 0.78, 0.74), C(0.9, 0.7, 0.68), 90);
+const cerebrumColor = (x, y, z) => lerp3(C(0.72, 0.48, 0.5), cerebrumBase(x, y, z), gyri(x, y, z));
+
+// המוח הקטן עם קפלים דקים (פוליה) שמתעקלים סביבו, וגזע המוח שממשיך לחוט השדרה
+const STEM = [cone([0, 1.648, -0.018], [0, 1.618, -0.02], 0.011, 0.012), ellipsoid([0, 1.607, -0.014], [0.0145, 0.012, 0.011]), cone([0, 1.6, -0.022], [0, 1.568, -0.044], 0.0082, 0.0062)];
+
+function cerebellum(G) {
+  G.add([...MIRROR.map((s) => ellipsoid([s * 0.022, 1.607, -0.06], [0.03, 0.024, 0.033])), ellipsoid([0, 1.604, -0.062], [0.012, 0.024, 0.033])], 0.008);
+  G.map((v, x, y, z) => (Math.abs(v) > 0.004 ? v : v + 0.0013 * (0.5 + 0.5 * Math.cos(Math.hypot(x * 0.7, y - 1.628, z + 0.04) * 1300))), [-0.06, 1.57, -0.1, 0.06, 1.64, -0.02]);
+  G.add(STEM, 0.006);
+}
+
+const cerebellumColor = paint(mottle(C(0.9, 0.68, 0.66), C(0.84, 0.6, 0.6), 120), [[STEM, C(0.9, 0.72, 0.68)]], 0.002);
+
+// ---------- הקיבה ----------
+// צינור לאורך הקיבה, עם קיבה עליונה (פונדוס) שמתנפחת מעל הכניסה, וטבעת השוער ביציאה
 function stomachShapes() {
-  return tube(STOMACH, 0);
+  return [...tube(STOMACH, 0), sphere([0.062, 1.17, -0.006], 0.029), sphere(STOMACH[STOMACH.length - 1], 0.0145)];
 }
 
+function stomach(G) {
+  G.add(stomachShapes(), 0.012);
+  // קצה הוושט שנכנס מלמעלה, ותחילת התריסריון אחרי השוער – חתוכים, כמו באטלס
+  vesselEnd(G, STOMACH[0].slice(0, 3), [0.03, 1.215, -0.008], 0.0085);
+  vesselEnd(G, STOMACH[STOMACH.length - 1].slice(0, 3), [-0.041, 1.067, 0.035], 0.011);
+}
+
+// פס כלי הדם לאורך הקימור הגדול (הצד החיצוני של הקיבה), רחב ורך כדי שלא ייראה כמו שריטה
+const STOMACH_VESSELS = (() => {
+  const S = stomachShapes();
+  const d = (x, y, z) => S.reduce((v, s) => smin(v, s.d(x, y, z), 0.012), FAR);
+  return tube(STOMACH.slice(1, -1).map((p) => [...onSurface(d, p, norm3(add3(norm3(sub3(p, [0.03, 1.125, 0.025])), [0, 0, 0.5]))), 0.0022]), 0);
+})();
+const stomachColor = paint(mottle(C(0.93, 0.64, 0.58), C(0.86, 0.52, 0.5), 50), [[STOMACH_VESSELS, C(0.86, 0.42, 0.4)]], 0.0035);
+
+// ---------- הכבד ----------
+// מעטפת הכבד; מעליה חותכת כיפת הסרעפת, ומלמטה המשטח שפונה אל הקיבה והמעיים
 export function liverShapes() {
-  return ellipsoid(LIVER.c, LIVER.r);
+  return ellipsoid(LIVER.c, [0.11, 0.072, 0.07]);
 }
 
 function liver(G) {
   G.add(liverShapes());
-  // האונה השמאלית דקה יותר: חותכים במישור שיורד לכיוון שמאל
-  const n = norm3([0.35, 1, 0]);
-  const p0 = [-0.035, 1.19, 0.02];
-  G.map((v, x, y, z) => smax(v, dot3(sub3([x, y, z], p0), n), 0.02));
-  G.sub(stomachShapes().map((h) => ({ d: (x, y, z) => h.d(x, y, z) - 0.004, box: h.box })), 0.01);
-  G.sub(sphere([-0.083, 1.06, 0.0], 0.13), 0.01); // מתחת לסרעפת
+  const dr = dome(-1), dl = sphere([0, 1.004, 0.035], 0.162);
+  G.map((v, x, y, z) => smax(v, Math.min(dr.d(x, y, z), dl.d(x, y, z)) + 0.006, 0.012));
+  // השפה התחתונה חדה ועולה שמאלה: האונה הימנית גבוהה ועבה, השמאלית דקה
+  const n = norm3([0.4, -1, 0.25]), p0 = [-0.04, 1.097, 0.07];
+  G.map((v, x, y, z) => smax(v, dot3(sub3([x, y, z], p0), n), 0.006));
+  // מקום לקיבה ולכיס המרה, וחריץ קטן של הרצועה שבין שתי האונות
+  G.sub([...stomachShapes().map((h) => ({ d: (x, y, z) => h.d(x, y, z) - 0.004, box: h.box })), cone(add3(GALLBLADDER.c, [0.004, 0.016, -0.03]), GALLBLADDER.c, 0.012, 0.011)], 0.01);
+  G.map((v, x, y, z) => (z > 0.02 && v > -0.006 ? smax(v, Math.min(0.0016 - Math.abs(x - 0.004), v + 0.004), 0.0015) : v));
+  G.map((v, x, y, z) => (Math.abs(v) > 0.003 ? v : v + 0.0004 * noise(x * 150, y * 150, z * 150)));
+}
+
+const liverBase = mottle(C(0.5, 0.17, 0.12), C(0.38, 0.11, 0.08), 60);
+const liverColor = (x, y, z) => lerp3(liverBase(x, y, z), C(0.8, 0.62, 0.52), 0.6 * (1 - sstep(0.001, 0.004, Math.abs(x - 0.004))) * sstep(0.02, 0.04, z));
+
+// ---------- המעיים ----------
+// מסלול שממלא שטח בלי לחצות את עצמו (עקומת הילברט 4×4), מוזז קצת ברעש כדי שהלולאות ייראו טבעיות
+function hilbert(d) {
+  let x = 0, y = 0;
+  for (let s = 1, t = d; s < 4; s *= 2, t >>= 2) {
+    const rx = (t >> 1) & 1, ry = (t ^ rx) & 1;
+    if (!ry) {
+      if (rx) [x, y] = [s - 1 - x, s - 1 - y];
+      [x, y] = [y, x];
+    }
+    x += s * rx;
+    y += s * ry;
+  }
+  return [x, y];
 }
 
 function smallIntestine(G) {
   G.add(tube(DUODENUM, 0.012), 0.004);
-  // המעי הדק מתקפל הלוך ושוב בשתי שכבות, עם גלים קטנים
-  const pts = [DUODENUM[DUODENUM.length - 1]];
-  let dir = 1;
-  for (const z of [0.03, 0.062]) {
-    for (let row = 0; row < 5; row++) {
-      const y = 0.99 - row * 0.02 - (z > 0.05 ? 0.01 : 0);
-      for (let q = 0; q <= 12; q++) {
-        const t = q / 12;
-        const x = (dir > 0 ? -0.07 + t * 0.14 : 0.07 - t * 0.14) * (1 - row * 0.04);
-        pts.push([x, y + 0.008 * Math.sin(q * 2.2 + row), z + 0.01 * Math.cos(q * 1.7 + row)]);
-      }
-      dir = -dir;
+  // שתי שכבות של לולאות: האחורית מתחילה למעלה משמאל, הקדמית נגמרת למטה מימין, ליד המעי העיוור
+  const pts = [DUODENUM[DUODENUM.length - 1], [0.03, 1.02, 0.024]];
+  const jit = (p, a) => [p[0] + a * noise(p[0] * 90, p[1] * 90, 1), p[1] + a * noise(p[0] * 90, 3, p[2] * 90), p[2] + 1.5 * a * noise(5, p[1] * 90, p[0] * 90)];
+  const layer = (at) => {
+    for (let d = 0; d < 16; d++) {
+      const p = at(...hilbert(d));
+      // בין שתי נקודות – נקודה באמצע שזזה הצידה, כדי שהצינור יתפתל
+      if (d) pts.push(jit(lerp3(pts[pts.length - 1], p, 0.5), 0.012));
+      pts.push(jit(p, 0.005));
     }
-  }
-  pts.push([-0.075, 0.915, 0.04], COLON[0]);
-  G.add(tube(pts, 0.0105), 0.003);
+  };
+  layer((i, j) => [0.06 - i * 0.04, 1.0 - j * 0.028, 0.03]);
+  layer((i, j) => [-0.06 + j * 0.04, 0.985 - i * 0.028, 0.057]);
+  pts.push([-0.075, 0.91, 0.045], COLON[0]);
+  G.add(tube(pts, 0.011), 0.003);
+  G.add(ellipsoid([0, 0.952, 0.02], [0.07, 0.05, 0.011]), 0.004); // הקרום שמאחורי הלולאות (המזנטריום), כדי שלא ייראו חורים ביניהן
 }
+
+const intestineColor = mottle(C(0.97, 0.68, 0.64), C(0.9, 0.55, 0.55), 55);
 
 function colon(G) {
-  // המעי הגס עם "כיסים" (הוסטרות) לאורכו
-  G.add(tube(COLON, 0, (t, l) => (t > 0.85 ? 0.017 : 0.021) * (1 + 0.12 * Math.sin(l * 2 * Math.PI / 0.032))), 0.004);
-  G.add(cone([-0.082, 0.905, 0.038], [-0.078, 0.885, 0.04], 0.02, 0.012), 0.006); // התוספתן ותחילת המעי
-  G.add(cone([-0.078, 0.885, 0.04], [-0.07, 0.865, 0.03], 0.004), 0.003);
+  // המעי הגס עם "כיסים" (הוסטרות): שקיות תפוחות עם קפלים צרים ביניהן. בסוף (המעי החלחולי) הוא חלק יותר
+  G.add(tube(smoothPath(COLON, 3), 0, (t, l) => (t > 0.85 ? 0.016 : 0.021) * (1 - (t > 0.85 ? 0.04 : 0.28) * (1 - Math.sqrt(Math.abs(Math.sin((l * Math.PI) / 0.03)))))), 0.004);
+  G.add(ellipsoid([-0.08, 0.896, 0.038], [0.022, 0.022, 0.02]), 0.008); // המעי העיוור
+  G.add(tube([[-0.074, 0.884, 0.03], [-0.068, 0.87, 0.026], [-0.058, 0.865, 0.03], [-0.05, 0.87, 0.037]], 0.0036), 0.004); // התוספתן
 }
 
+const colonColor = mottle(C(0.88, 0.67, 0.54), C(0.78, 0.55, 0.47), 45);
+
+// ---------- הכליות ----------
+// שעועית עם שקע פנימי (השער), אגן הכליה שהופך לשופכן, יותרת הכליה על הקוטב העליון, ועורק ווריד קצרים
+const KIDNEY_PARTS = KIDNEYS.map((k) => {
+  const s = k.s, h = k.hilum;
+  return {
+    k,
+    R: basis([1, 0, 0], [-s * 0.18, 1, 0]),
+    pelvis: [cone(lerp3(k.c, h, 0.55), [s * 0.041, h[1] - 0.018, h[2] + 0.003], 0.0095, 0.003)],
+    adrenal: [ellipsoid([s * 0.058, k.c[1] + 0.052, k.c[2] + 0.003], [0.014, 0.009, 0.0055], basis([s, -0.7, 0], [0, 0, 1]))],
+    artery: [add3(h, [0, 0.004, -0.004]), [s * 0.03, h[1] + 0.006, -0.036], 0.003],
+    vein: [add3(h, [0, 0, 0.004]), [s * 0.03, h[1] + 0.001, -0.03], 0.0038],
+  };
+});
+
 function kidneys(G) {
-  for (const k of KIDNEYS) {
-    const R = basis([1, 0, 0], [-k.s * 0.18, 1, 0]);
-    G.add(ellipsoid(k.c, [0.026, 0.05, 0.02], R));
-    G.sub(sphere(k.hilum, 0.013), 0.008);
+  for (const p of KIDNEY_PARTS) {
+    G.add(ellipsoid(p.k.c, [0.027, 0.053, 0.02], p.R));
+    G.sub(sphere(p.k.hilum, 0.013), 0.008);
+    G.add(p.pelvis, 0.005);
+    G.add(p.adrenal, 0.003);
+    for (const v of [p.artery, p.vein]) vesselEnd(G, ...v);
   }
 }
+
+const kidneyColor = paint(mottle(C(0.64, 0.22, 0.18), C(0.52, 0.15, 0.14), 70), [
+  [KIDNEY_PARTS.flatMap((p) => p.pelvis), C(0.94, 0.86, 0.68)],
+  [KIDNEY_PARTS.flatMap((p) => p.adrenal), C(0.93, 0.68, 0.3)],
+  [KIDNEY_PARTS.map((p) => cone(...p.artery)), RED],
+  [KIDNEY_PARTS.map((p) => cone(...p.vein)), BLUE],
+], 0.0015);
 
 // ---------- רשימת החלקים ----------
 // cell – גודל התא ברשת (קטן יותר = יותר פרטים, יותר עבודה). q מאפשר להגדיל את כולם במכשיר חלש
 export const PARTS = [
   { id: 'body', grids: [{ min: [-0.36, -0.01, -0.16], max: [0.36, 1.77, 0.2], cell: 0.005, build: null }] },
-  { id: 'heart', grids: [{ min: [-0.06, 1.17, -0.04], max: [0.1, 1.34, 0.12], cell: 0.0025, build: (G) => G.add(heartShapes(), 0.014) }] },
-  { id: 'lungs', grids: [{ min: [-0.17, 1.13, -0.11], max: [0.17, 1.46, 0.1], cell: 0.0035, build: lungs }] },
-  { id: 'brain', grids: [{ min: [-0.075, 1.5, -0.1], max: [0.075, 1.74, 0.085], cell: 0.0022, build: brain }] },
-  { id: 'stomach', grids: [{ min: [-0.05, 1.0, -0.05], max: [0.13, 1.21, 0.1], cell: 0.003, build: (G) => G.add(stomachShapes(), 0.02) }] },
-  { id: 'liver', grids: [{ min: [-0.16, 1.06, -0.07], max: [0.1, 1.22, 0.11], cell: 0.0035, build: liver }] },
-  { id: 'smallIntestine', grids: [{ min: [-0.1, 0.88, -0.01], max: [0.1, 1.08, 0.09], cell: 0.0028, build: smallIntestine }] },
-  { id: 'colon', grids: [{ min: [-0.13, 0.83, -0.06], max: [0.14, 1.07, 0.1], cell: 0.0032, build: colon }] },
-  { id: 'kidneys', grids: [{ min: [-0.11, 0.99, -0.08], max: [0.11, 1.13, -0.01], cell: 0.0025, build: kidneys }] },
-  { id: 'bladder', grids: [{ min: [-0.05, 0.83, 0.0], max: [0.05, 0.92, 0.08], cell: 0.003, build: (G) => G.add(ellipsoid(BLADDER.c, BLADDER.r)) }] },
+  { id: 'heart', grids: [{ min: [-0.065, 1.165, -0.035], max: [0.1, 1.356, 0.12], cell: 0.002, build: heart, color: heartColor }] },
+  { id: 'lungs', grids: [{ min: [-0.15, 1.1, -0.11], max: [0.15, 1.45, 0.095], cell: 0.003, build: lungs, color: lungColor }] },
+  { id: 'brain', grids: [
+    { min: [-0.082, 1.6, -0.095], max: [0.082, 1.735, 0.08], cell: 0.0019, build: cerebrum, color: cerebrumColor },
+    { min: [-0.06, 1.555, -0.1], max: [0.06, 1.665, 0], cell: 0.0016, build: cerebellum, color: cerebellumColor },
+  ] },
+  { id: 'stomach', grids: [{ min: [-0.055, 1.0, -0.05], max: [0.13, 1.225, 0.1], cell: 0.0028, build: stomach, color: stomachColor }] },
+  { id: 'liver', grids: [{ min: [-0.16, 1.045, -0.07], max: [0.09, 1.19, 0.1], cell: 0.003, build: liver, color: liverColor }] },
+  { id: 'smallIntestine', grids: [{ min: [-0.1, 0.87, -0.01], max: [0.1, 1.095, 0.09], cell: 0.0028, build: smallIntestine, color: intestineColor }] },
+  { id: 'colon', grids: [{ min: [-0.13, 0.83, -0.06], max: [0.14, 1.08, 0.1], cell: 0.0029, build: colon, color: colonColor }] },
+  { id: 'kidneys', grids: [{ min: [-0.11, 0.99, -0.08], max: [0.11, 1.14, -0.01], cell: 0.0022, build: kidneys, color: kidneyColor }] },
+  { id: 'bladder', grids: [{ min: [-0.05, 0.82, 0.0], max: [0.05, 0.92, 0.08], cell: 0.0028, build: (G) => G.add([ellipsoid(BLADDER.c, BLADDER.r), cone([0, 0.858, 0.038], [0, 0.836, 0.032], 0.012, 0.004)], 0.01), color: mottle(C(0.94, 0.76, 0.64), C(0.88, 0.64, 0.58), 60) }] },
   { id: 'skeleton', grids: [
     { min: [-0.085, 1.5, -0.11], max: [0.085, 1.75, 0.1], cell: 0.003, build: skullShapes },
     { min: [-0.2, 0.84, -0.12], max: [0.2, 1.58, 0.12], cell: 0.0032, build: torsoBones },
