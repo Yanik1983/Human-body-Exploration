@@ -219,7 +219,9 @@ class Grid {
 const CORNERS = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
 const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
 
-function surfaceNet(grid, iso = 0) {
+// colorFn(x, y, z) → [r, g, b] (0..1) צובע כל נקודה; בלי צבע מקבלים לבן. בכל מקרה הצבע מוכפל בהצללה של
+// הקפלים והשקעים (Ambient Occlusion), שמחושבת מהשדה עצמו: כמה פני השטח "סגורים" סביב הנקודה
+function surfaceNet(grid, iso = 0, colorFn = null) {
   const { n, v, min, cell } = grid;
   const [nx, ny, nz] = n;
   const nxy = nx * ny;
@@ -277,7 +279,19 @@ function surfaceNet(grid, iso = 0) {
     nor[q + 1] = gy / l;
     nor[q + 2] = gz / l;
   }
-  return { position: new Float32Array(pos), normal: nor, index: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
+  const col = new Uint8Array(pos.length);
+  for (let q = 0; q < pos.length; q += 3) {
+    const x = pos[q], y = pos[q + 1], z = pos[q + 2];
+    let occ = 0;
+    for (let s = 1, w = 0.5; s <= 4; s++, w *= 0.5) {
+      const d = cell * 1.6 * s;
+      occ += w * Math.max(0, d - (grid.sample(x + nor[q] * d, y + nor[q + 1] * d, z + nor[q + 2] * d) - iso)) / d;
+    }
+    const ao = clamp(1 - 1.4 * occ, 0.35, 1);
+    const c = colorFn ? colorFn(x, y, z) : [1, 1, 1];
+    for (let k = 0; k < 3; k++) col[q + k] = Math.round(clamp(c[k] * ao, 0, 1) * 255);
+  }
+  return { position: new Float32Array(pos), normal: nor, color: col, index: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
 }
 
 // ---------- הגוף ----------
@@ -570,7 +584,7 @@ export function buildPart(part, q = 1) {
     }
     const G = new Grid(spec.min, spec.max, spec.cell * q);
     spec.build(G);
-    out.push(surfaceNet(G));
+    out.push(surfaceNet(G, 0, spec.color));
   }
   return out;
 }

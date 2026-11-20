@@ -94,7 +94,7 @@ const organMat = (color, extra = {}) => new THREE.MeshPhysicalMaterial({ color, 
 
 // העור: זכוכית שקופה עם שוליים זוהרים, או עור אמיתי (uSolid = 1) בתחנה של העור
 const skinUniforms = { uSolid: { value: 0 }, uOpacity: { value: 1 } };
-const skinMat = new THREE.MeshPhysicalMaterial({ color: '#e3ab8f', roughness: 0.55, sheen: 0.6, sheenColor: new THREE.Color('#ffd2bf'), transparent: true, depthWrite: false });
+const skinMat = new THREE.MeshPhysicalMaterial({ color: '#e3ab8f', vertexColors: true, roughness: 0.55, sheen: 0.6, sheenColor: new THREE.Color('#ffd2bf'), transparent: true, depthWrite: false });
 skinMat.onBeforeCompile = (sh) => {
   Object.assign(sh.uniforms, skinUniforms);
   sh.fragmentShader = 'uniform float uSolid;\nuniform float uOpacity;\n' + sh.fragmentShader.replace(
@@ -108,7 +108,7 @@ skinMat.onBeforeCompile = (sh) => {
 };
 
 // השרירים: אדום עם סיבים דקים
-const muscleMat = organMat('#b5332d', { clearcoat: 0.3, sheen: 0.5 });
+const muscleMat = organMat('#b5332d', { clearcoat: 0.3, sheen: 0.5, vertexColors: true });
 muscleMat.onBeforeCompile = (sh) => {
   sh.vertexShader = 'varying vec3 vPos;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPos = position;');
   sh.fragmentShader = 'varying vec3 vPos;\n' + sh.fragmentShader.replace(
@@ -246,6 +246,7 @@ function meshFrom(m, material) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(m.position, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(m.color, 3, true)); // צבע לכל נקודה + הצללה בקפלים
   geo.setIndex(new THREE.BufferAttribute(m.index, 1));
   geo.computeBoundingSphere();
   return new THREE.Mesh(geo, material);
@@ -274,6 +275,7 @@ function onPart({ id, meshes }) {
     const [layer, station, color] = PART_INFO[id];
     const material = id === 'skeleton' ? organMat(color, { roughness: 0.6, clearcoat: 0.15, sheen: 0 }) : organMat(color);
     const geos = meshes.map((m) => meshFrom(m, material).geometry);
+    material.vertexColors = true; // רק לחלקים מ־anatomy.js יש צבע לכל נקודה
     let mesh = new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos) : geos[0], material);
     if (id === 'heart') mesh = animated.heart = pivoted(mesh, V(HEART.c));
     if (id === 'lungs') mesh = animated.lungs = pivoted(mesh, new THREE.Vector3(0, 1.3, 0));
