@@ -105,7 +105,7 @@ const camera = new THREE.PerspectiveCamera(32, window.innerWidth / window.innerH
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.minDistance = 0.25;
-controls.maxDistance = 6;
+controls.maxDistance = 9; // בטלפון, כל הגוף מעל חלון ההסבר נמצא במרחק של כמעט 7 מטרים
 controls.maxPolarAngle = Math.PI * 0.92;
 controls.autoRotateSpeed = 0.6;
 
@@ -639,7 +639,8 @@ const LAYERS = [
   ['blood', '🩸', 'דם'],
   ['nerves', '⚡', 'עצבים'],
 ];
-const DEFAULT_LAYERS = ['skin', 'organs'];
+// שכבת העור: דולקת = עור אמיתי שמכסה את כל מה שבפנים; כבויה = הגוף שקוף כמו זכוכית, ורואים פנימה
+const DEFAULT_LAYERS = ['organs'];
 const layersOn = new Set(DEFAULT_LAYERS);
 for (const [id, emoji, name] of LAYERS) {
   const b = document.createElement('button');
@@ -648,7 +649,10 @@ for (const [id, emoji, name] of LAYERS) {
   b.dataset.layer = id;
   b.innerHTML = `<span aria-hidden="true">${emoji}</span> ${name}`;
   b.addEventListener('click', () => {
-    if (layersOn.has(id)) layersOn.delete(id);
+    if (id !== 'skin' && layersOn.has('skin')) {
+      layersOn.delete('skin'); // העור מכסה הכול, אז הוא נכבה כדי שיראו את השכבה שנלחצה
+      layersOn.add(id);
+    } else if (layersOn.has(id)) layersOn.delete(id);
     else layersOn.add(id);
     syncLayerButtons();
   });
@@ -672,29 +676,33 @@ syncLayerButtons();
 // t – לאן מסתכלים, d – מרחק, az – זווית סביב הגוף (0 = מלפנים, π = מאחור), layers – אילו שכבות דולקות
 const OVERVIEW = { t: [0, 0.95, 0], d: 3.1, az: 0.3 };
 const VIEWS = {
-  skin: { t: [0, 0.95, 0], d: 3.1, az: 0.35, layers: ['skin'], solid: true },
-  skeleton: { t: [0, 0.95, 0], d: 3.1, az: 0.4, layers: ['skin', 'skeleton'] },
+  skin: { t: [0, 0.95, 0], d: 3.1, az: 0.35, layers: ['skin'] },
+  skeleton: { t: [0, 0.95, 0], d: 3.1, az: 0.4, layers: ['skeleton'] },
   muscles: { t: [0, 0.98, 0], d: 3.0, az: -0.35, layers: ['muscles'] },
-  brain: { t: [0, 1.65, 0], d: 0.62, az: 0.7, layers: ['skin', 'organs'] },
-  nerves: { t: [0, 0.95, 0], d: 3.1, az: 2.6, layers: ['skin', 'nerves', 'skeleton'] },
-  eyes: { t: [0, 1.64, 0.04], d: 0.42, az: 0.45, layers: ['skin', 'organs'] },
-  lungs: { t: [0, 1.29, 0], d: 0.95, az: 0.25, layers: ['skin', 'organs'] },
-  heart: { t: [0.015, 1.26, 0.03], d: 0.62, az: 0.35, layers: ['skin', 'organs', 'blood'] },
-  blood: { t: [0, 0.95, 0], d: 3.1, az: 0.3, layers: ['skin', 'organs', 'blood'] },
-  mouth: { t: [0, 1.53, 0.03], d: 0.6, az: 1.1, layers: ['skin', 'organs'] },
-  stomach: { t: [0.03, 1.1, 0.03], d: 0.75, az: 0.35, layers: ['skin', 'organs'] },
-  liver: { t: [-0.03, 1.12, 0.03], d: 0.75, az: -0.4, layers: ['skin', 'organs'] },
-  intestines: { t: [0, 0.97, 0.03], d: 0.8, az: 0.2, layers: ['skin', 'organs'] },
-  kidneys: { t: [0, 1.0, -0.03], d: 0.95, az: Math.PI - 0.3, layers: ['skin', 'organs'] },
+  brain: { t: [0, 1.65, 0], d: 0.62, az: 0.7, layers: ['organs'] },
+  nerves: { t: [0, 0.95, 0], d: 3.1, az: 2.6, layers: ['nerves', 'skeleton'] },
+  eyes: { t: [0, 1.64, 0.04], d: 0.42, az: 0.45, layers: ['organs'] },
+  lungs: { t: [0, 1.29, 0], d: 0.95, az: 0.25, layers: ['organs'] },
+  heart: { t: [0.015, 1.26, 0.03], d: 0.62, az: 0.35, layers: ['organs', 'blood'] },
+  blood: { t: [0, 0.95, 0], d: 3.1, az: 0.3, layers: ['organs', 'blood'] },
+  mouth: { t: [0, 1.53, 0.03], d: 0.6, az: 1.1, layers: ['organs'] },
+  stomach: { t: [0.03, 1.1, 0.03], d: 0.75, az: 0.35, layers: ['organs'] },
+  liver: { t: [-0.03, 1.12, 0.03], d: 0.75, az: -0.4, layers: ['organs'] },
+  intestines: { t: [0, 0.97, 0.03], d: 0.8, az: 0.2, layers: ['organs'] },
+  kidneys: { t: [0, 1.0, -0.03], d: 0.95, az: Math.PI - 0.3, layers: ['organs'] },
 };
 
 let focus = null; // התחנה שמודגשת עכשיו
-let solidSkin = false;
 let tween = null;
 
+const topbarBottom = () => document.querySelector('.topbar').getBoundingClientRect().bottom;
+
 function viewDistance(d) {
+  const h = window.innerHeight, box = infoBox();
+  // בטלפון חלון ההסבר מכסה את תחתית המסך: כשמראים את כל הגוף (d גדול) מתרחקים עד שהוא נכנס מעל החלון
+  const free = box && phone() && d > 2 ? box.getBoundingClientRect().top - topbarBottom() : h;
   // במסך צר (טלפון לאורך) צריך להתרחק כדי שהגוף ייכנס
-  return d * Math.max(1, 0.75 / camera.aspect);
+  return d * Math.max(1, 0.75 / camera.aspect, h / free);
 }
 
 function flyTo(view, duration = 1.4) {
@@ -726,7 +734,6 @@ function focusStation(id) {
   focus = id;
   const view = id ? VIEWS[id] : null;
   setLayers(view?.layers || DEFAULT_LAYERS);
-  solidSkin = !!view?.solid;
   flyTo(view || OVERVIEW);
   markActive(id);
 }
@@ -734,8 +741,10 @@ function focusStation(id) {
 // השקיפות של כל חלק נקבעת לפי השכבות והתחנה, ומשתנה בהדרגה
 function updateEntries(dt) {
   const k = 1 - Math.exp(-dt * 6);
+  const skinOn = layersOn.has('skin');
   for (const e of entries) {
-    let target = layersOn.has(e.layer) ? 1 : 0;
+    // עור אמיתי מכסה (ומסתיר) את השכבות שבפנים. כשהוא כבוי נשארת זכוכית שקופה, אלא אם השרירים כבר מראים את צורת הגוף
+    let target = e.layer === 'skin' ? (skinOn || !layersOn.has('muscles') ? 1 : 0) : layersOn.has(e.layer) && !skinOn ? 1 : 0;
     // בתחנה: מה ששייך לה מודגש, ושאר האיברים מתעמעמים כדי לא להסתיר
     if (target && focus && e.station !== focus && e.layer !== 'skin') target = e.layer === 'organs' ? 0.22 : 0.18;
     e.cur += (target - e.cur) * k;
@@ -758,7 +767,7 @@ function updateEntries(dt) {
   const skin = entries.find((e) => e.layer === 'skin');
   if (skin) {
     skinUniforms.uOpacity.value = skin.cur;
-    skinUniforms.uSolid.value += ((solidSkin ? 1 : 0) - skinUniforms.uSolid.value) * k;
+    skinUniforms.uSolid.value += ((skinOn ? 1 : 0) - skinUniforms.uSolid.value) * k;
     skinMat.depthWrite = skinUniforms.uSolid.value > 0.98;
   }
 }
@@ -1052,8 +1061,9 @@ $('btn-listen').addEventListener('click', () => {
 function showStation(id) {
   const s = stationById[id];
   selectedStation = s;
-  focusStation(id);
+  // החלון מוצג לפני שמכוונים את המצלמה, כי בטלפון המרחק תלוי במקום שהחלון תופס
   showPanel({ title: s.name, subtitle: s.subtitle, emoji: s.emoji, text: s.narration, short: s.short, facts: s.facts, funFact: s.funFact });
+  focusStation(id);
 }
 
 function userSelect(id) {
@@ -1335,9 +1345,9 @@ function goToStep(i) {
   if (step.station) showStation(step.station);
   else {
     selectedStation = null;
-    focusStation(null);
     presenter.play(step.intro === TOUR_OUTRO ? 'wave' : 'open', 2.6);
     showPanel({ title: step.intro.title, text: step.intro.narration, short: step.intro.short });
+    focusStation(null);
     if (step.intro.id === 'how') $('layers').classList.add('glow');
   }
   const advance = () => {
@@ -1441,8 +1451,8 @@ function updateViewOffset(dt) {
   let target = 0, targetY = 0;
   if (box) {
     const r = box.getBoundingClientRect();
-    // בטלפון החלון בתחתית – מרימים את התמונה; במחשב הוא בצד – מזיזים הצידה
-    if (phone()) targetY = Math.max(0, window.innerHeight - r.top) * 0.45;
+    // בטלפון החלון בתחתית – מרימים את התמונה למרכז האזור הפנוי שמעליו; במחשב הוא בצד – מזיזים הצידה
+    if (phone()) targetY = Math.max(0, window.innerHeight / 2 - (topbarBottom() + r.top) / 2);
     else target = (r.left > window.innerWidth / 2 ? -(r.width / 2) : r.width / 2) * 0.9;
   }
   const k = 1 - Math.exp(-dt * 5);

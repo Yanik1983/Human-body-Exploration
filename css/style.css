@@ -210,6 +210,8 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
   color: var(--muted);
   font-size: 16px;
   cursor: pointer;
+  /* מעל שאר התוכן של החלון: האנימציה של הכניסה (.panel.swap > *) שמה כל חלק בשכבה משלו, והכותרת כיסתה את הכפתור */
+  z-index: 1;
 }
 .close:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
 .panel-head { display: flex; align-items: center; gap: 12px; padding-inline-end: 30px; }
