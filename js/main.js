@@ -1,8 +1,9 @@
 // מסע בגוף האדם: הסצנה התלת־ממדית, השכבות, הבחירה באיברים, ההקראה, המילון והסיור המודרך.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { Narrator, splitSentences, DEFAULT_SETTINGS } from './speech.js';
 import { Presenter } from './kid-presenter.js';
 import { STATIONS, TOUR_INTRO, TOUR_OUTRO } from './data.js';
@@ -18,64 +19,82 @@ const stationById = Object.fromEntries(STATIONS.map((s) => [s.id, s]));
 const phone = () => window.innerWidth <= 720;
 const weakDevice = (navigator.hardwareConcurrency || 4) < 4 || (navigator.deviceMemory || 4) < 3;
 
+// במכשיר חלש או בטלפון: בלי זוהר וברזולוציה נמוכה יותר, כדי שהתמונה תזוז חלק
+const highQuality = !weakDevice && !phone();
+
 // ---------- סצנה ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, weakDevice ? 1.5 : 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, highQuality ? 2 : 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 $('scene').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+// רקע: אור רך מאחורי הגוף שמתכהה לכחול עמוק בשוליים (לא שחור)
 scene.background = (() => {
   const c = document.createElement('canvas');
-  c.width = 4;
-  c.height = 256;
+  c.width = c.height = 256;
   const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#0b2238');
-  grad.addColorStop(0.6, '#08304a');
-  grad.addColorStop(1, '#041320');
+  const grad = g.createRadialGradient(128, 105, 0, 128, 128, 200);
+  grad.addColorStop(0, '#1a536e');
+  grad.addColorStop(0.45, '#0d3149');
+  grad.addColorStop(1, '#03101c');
   g.fillStyle = grad;
-  g.fillRect(0, 0, 4, 256);
+  g.fillRect(0, 0, 256, 256);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 })();
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.55;
-scene.add(new THREE.HemisphereLight(0xd8ecff, 0x2a3440, 1.1));
-const key = new THREE.DirectionalLight(0xfff1e0, 2.2);
-key.position.set(1.5, 3, 2.5);
-scene.add(key);
-const rim = new THREE.DirectionalLight(0x8fd8ff, 1.4);
-rim.position.set(-2, 2, -2);
-scene.add(rim);
 
-// במה זוהרת מתחת לרגליים
+// סביבת סטודיו: חדר כהה עם לוחות אור רכים, שמשתקפים בברק הרטוב של האיברים. היא מסתובבת עם המצלמה, כמו האורות
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = (() => {
+  const room = new THREE.Scene();
+  room.add(new THREE.Mesh(new THREE.SphereGeometry(10, 16, 8), new THREE.MeshBasicMaterial({ color: '#22384a', side: THREE.BackSide })));
+  // [מיקום, רוחב, גובה, עוצמה]
+  for (const [pos, w, h, k] of [[[3, 4, 6], 5, 5, 3], [[0, 8, 0], 8, 8, 1.5], [[-6, 1, 4], 3, 6, 1.2], [[-5, 2, -6], 2, 8, 2.5], [[5, 1, -6], 2, 8, 1.5]]) {
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(k), side: THREE.DoubleSide }));
+    panel.position.set(...pos);
+    panel.lookAt(0, 0, 0);
+    room.add(panel);
+  }
+  return pmrem.fromScene(room, 0.02).texture;
+})();
+scene.environmentIntensity = 0.6;
+
+// במה: צל רך מתחת לכפות הרגליים ועיגול אור עדין סביבן
 const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(0.7, 64),
+  new THREE.CircleGeometry(0.75, 64),
   new THREE.MeshBasicMaterial({
     transparent: true,
     depthWrite: false,
     map: (() => {
       const c = document.createElement('canvas');
-      c.width = c.height = 256;
+      c.width = c.height = 512;
       const g = c.getContext('2d');
-      const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-      grad.addColorStop(0, 'rgba(90,210,255,0.45)');
-      grad.addColorStop(0.55, 'rgba(60,170,230,0.15)');
-      grad.addColorStop(1, 'rgba(60,170,230,0)');
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 256, 256);
-      g.strokeStyle = 'rgba(150,230,255,0.35)';
-      for (const r of [60, 95, 122]) {
-        g.beginPath();
-        g.arc(128, 128, r, 0, 7);
-        g.stroke();
-      }
-      return new THREE.CanvasTexture(c);
+      // כתם רך במטרים: מרכז הקנבס הוא מרכז הבמה, וקדימה (+z) הוא למטה בקנבס
+      const spot = (x, z, rx, rz, rgb, a) => {
+        g.setTransform(rx * 340, 0, 0, rz * 340, 256 + x * 340, 256 + z * 340);
+        const grad = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+        grad.addColorStop(0, `rgba(${rgb},${a})`);
+        grad.addColorStop(0.45, `rgba(${rgb},${a * 0.5})`);
+        grad.addColorStop(1, `rgba(${rgb},0)`);
+        g.fillStyle = grad;
+        g.fillRect(-1, -1, 2, 2);
+      };
+      spot(0, 0, 0.75, 0.75, '70,190,240', 0.2);
+      spot(0, 0.03, 0.32, 0.36, '0,6,12', 0.5);
+      for (const s of [1, -1]) spot(s * 0.105, 0.045, 0.065, 0.14, '0,4,8', 0.75);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.strokeStyle = 'rgba(150,225,255,0.28)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(256, 256, 0.62 * 340, 0, 7);
+      g.stroke();
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
     })(),
   }),
 );
@@ -89,6 +108,56 @@ controls.minDistance = 0.25;
 controls.maxDistance = 6;
 controls.maxPolarAngle = Math.PI * 0.92;
 controls.autoRotateSpeed = 0.6;
+
+// תאורת סטודיו שנעה עם המצלמה, כדי שכל תחנה תהיה מוארת יפה מכל זווית: ראשי חם, מילוי קריר, ושני אורות מאחור לקווי המתאר
+scene.add(new THREE.HemisphereLight('#d2e8ff', '#1c2a36', 0.45));
+scene.add(camera);
+const aim = new THREE.Object3D();
+aim.position.z = -2;
+camera.add(aim);
+for (const [color, intensity, pos] of [['#fff1e2', 2.7, [1.5, 2, 1]], ['#bcd9ff', 0.5, [-2.5, 0, 0.5]], ['#8fd3ff', 1.9, [-2, 1.2, -4.5]], ['#ffd9c4', 1.0, [2.2, 0.6, -4.5]]]) {
+  const light = new THREE.DirectionalLight(color, intensity);
+  light.position.set(...pos);
+  light.target = aim;
+  camera.add(light);
+}
+
+// זוהר רק לאותות בעצבים ובדם: רק הם מצוירים לתמונה קטנה שמטושטשת ומתווספת, כך שהעור השקוף והאיברים לא עוברים עיבוד ונשארים חדים וזולים
+let glow = null;
+if (highQuality) {
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1, 0.2, 0);
+  glow = {
+    scene: new THREE.Scene(),
+    target: new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }),
+    items: [],
+    bloom,
+    // מוסיפים רק את ההילה המטושטשת, כי הצינורות עצמם כבר בתמונה הרגילה
+    quad: new FullScreenQuad(new THREE.MeshBasicMaterial({ map: bloom.renderTargetsHorizontal[0].texture, toneMapped: false, depthTest: false, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor })),
+  };
+}
+// הצינור של החלק מצויר גם בתמונת הזוהר, עם אותם פסים זורמים
+function addGlow(e, color, map) {
+  if (!glow) return;
+  const mesh = new THREE.Mesh(e.mesh.geometry, new THREE.MeshBasicMaterial({ color, map, transparent: true, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false }));
+  glow.scene.add(mesh);
+  glow.items.push({ e, mesh });
+}
+function renderGlow() {
+  let any = false;
+  for (const { e, mesh } of glow.items) {
+    mesh.visible = e.mesh.visible;
+    mesh.material.opacity = e.cur * e.cur; // שכבה מעומעמת כמעט לא זוהרת
+    any ||= mesh.visible;
+  }
+  if (!any) return;
+  renderer.setRenderTarget(glow.target);
+  renderer.render(glow.scene, camera);
+  glow.bloom.render(renderer, null, glow.target, 0, false);
+  renderer.setRenderTarget(null);
+  renderer.autoClear = false;
+  glow.quad.render(renderer);
+  renderer.autoClear = true;
+}
 
 // ---------- חומרים ----------
 // איברים פנימיים (wetMat): רטובים ומבריקים. הזוהר וה"קטיפה" מוכפלים בצבע של כל נקודה, כדי שאיבר כהה (כמו הכבד) לא ייראה חלבי.
@@ -217,10 +286,11 @@ function stripeTexture(stops) {
   t.wrapS = THREE.RepeatWrapping;
   return t;
 }
-const flowStops = [[0, '#000'], [0.45, '#000'], [0.7, '#fff'], [1, '#000']];
-const arteryMat = organMat('#d8262e', { emissive: '#ff4040', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.9 });
-const veinMat = organMat('#2f55d4', { emissive: '#6d8dff', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.9 });
-const nerveMat = organMat('#f5c932', { emissive: '#fff2a0', emissiveMap: stripeTexture([[0, '#000'], [0.85, '#000'], [0.93, '#fff'], [1, '#000']]), emissiveIntensity: 1.4 });
+// זרימה: גל שמתחזק לאט ונגמר בחזית חדה, כמו דחיפה של הלב. בעצבים: אות קצר, ומעט זוהר תמידי בין האותות
+const flowStops = [[0, '#000'], [0.5, '#000'], [0.9, '#fff'], [1, '#000']];
+const arteryMat = organMat('#a8101c', { roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.2, emissive: '#ff3326', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.25 });
+const veinMat = organMat('#2443a8', { roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.2, emissive: '#5f7fff', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.25 });
+const nerveMat = organMat('#e6b52e', { roughness: 0.4, emissive: '#fff0a0', emissiveMap: stripeTexture([[0, '#121212'], [0.86, '#121212'], [0.94, '#fff'], [1, '#121212']]), emissiveIntensity: 1.3 });
 const ringTex = stripeTexture([[0, '#fff'], [0.5, '#fff'], [0.6, '#d49a9a'], [0.9, '#d49a9a'], [1, '#fff']]);
 const tracheaMat = wetMat('#f3c9c9', { map: ringTex, bumpMap: ringTex, bumpScale: 3 }); // טבעות הסחוס בולטות
 
@@ -245,16 +315,32 @@ function addEntry(obj, layer, station, { pick = true } = {}) {
   return e;
 }
 
-// צינור לאורך נקודות; ה־UV לאורך הצינור נמדד במטרים, כך שהפסים בכל הצינורות באותו גודל
+// צינור לאורך נקודות; מספר רביעי בנקודה הוא הרדיוס שם, כדי שהצינור יצטמצם. ה־UV לאורך הצינור במטרים, כדי שהפסים בכל הצינורות באותו גודל
 function tubeGeometry(points, radius, stripe = 0.05) {
   const curve = new THREE.CatmullRomCurve3(points.map(V));
   const len = curve.getLength();
-  const geo = new THREE.TubeGeometry(curve, Math.max(8, Math.round(len / 0.008)), radius, 8);
-  const uv = geo.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setX(i, (uv.getX(i) * len) / stripe);
+  const rs = points.map((p) => p[3] ?? radius);
+  const rMax = Math.max(...rs);
+  const n = Math.max(8, Math.round(len / 0.008));
+  const sides = rMax > 0.004 ? 16 : 8;
+  const geo = new THREE.TubeGeometry(curve, n, rMax, sides);
+  const pos = geo.attributes.position, uv = geo.attributes.uv;
+  const c = new THREE.Vector3(), p = new THREE.Vector3();
+  for (let i = 0; i <= n; i++) {
+    curve.getPointAt(i / n, c);
+    const t = curve.getUtoTmapping(i / n) * (rs.length - 1);
+    const k = Math.min(rs.length - 2, Math.floor(t));
+    const f = (rs[k] + (rs[k + 1] - rs[k]) * (t - k)) / rMax;
+    for (let j = 0; j <= sides; j++) {
+      const v = i * (sides + 1) + j;
+      p.fromBufferAttribute(pos, v).sub(c).multiplyScalar(f).add(c);
+      pos.setXYZ(v, p.x, p.y, p.z);
+      uv.setX(v, (i / n) * (len / stripe));
+    }
+  }
   return geo;
 }
-const tubes = (list, radius, stripe) => mergeGeometries(list.map((pts, i) => tubeGeometry(pts, typeof radius === 'function' ? radius(i, pts) : radius, stripe)));
+const tubes = (list, radius, stripe) => mergeGeometries(list.map((pts) => tubeGeometry(pts, radius, stripe)));
 
 // מצייר טקסטורה על קנבס בגודל n×n
 function canvasTexture(n, draw) {
@@ -461,9 +547,10 @@ function addRuntimeParts() {
   addEntry(buildGallbladder(), 'organs', 'liver');
   const ureters = KIDNEYS.map((k) => [k.hilum, [k.s * 0.04, 0.98, -0.03], [k.s * 0.03, 0.91, 0.015], [k.s * 0.014, 0.885, 0.025]]);
   addEntry(new THREE.Mesh(tubes(ureters, 0.0025), wetMat('#ead3a0')), 'organs', 'kidneys');
-  addEntry(new THREE.Mesh(tubes(ARTERIES, (i) => (i === 0 ? 0.009 : i > 6 ? 0.003 : 0.0045)), arteryMat), 'blood', 'blood');
-  addEntry(new THREE.Mesh(tubes(VEINS, (i) => (i < 2 ? 0.0095 : 0.005)), veinMat), 'blood', 'blood');
-  addEntry(new THREE.Mesh(mergeGeometries([tubeGeometry(SPINAL_CORD, 0.0065, 0.08), tubes(NERVES, (i, pts) => (pts.length <= 3 ? 0.0015 : 0.0026), 0.08)]), nerveMat), 'nerves', 'nerves');
+  addGlow(addEntry(new THREE.Mesh(tubes(ARTERIES, 0.001), arteryMat), 'blood', 'blood'), new THREE.Color('#ff2a1c').multiplyScalar(0.3), arteryMat.emissiveMap);
+  addGlow(addEntry(new THREE.Mesh(tubes(VEINS, 0.001), veinMat), 'blood', 'blood'), new THREE.Color('#3f62ff').multiplyScalar(0.3), veinMat.emissiveMap);
+  const nerves = mergeGeometries([tubeGeometry(SPINAL_CORD, 0, 0.12), tubes(NERVES, 0.0009, 0.12)]);
+  addGlow(addEntry(new THREE.Mesh(nerves, nerveMat), 'nerves', 'nerves'), new THREE.Color('#ffd23a').multiplyScalar(0.8), nerveMat.emissiveMap);
 }
 
 // החלקים שנבנים ב־Worker (anatomy.js)
@@ -687,8 +774,8 @@ function updateLife(t, dt) {
     animated.lungs.scale.set(1 + a * br, 1 + a * 0.6 * br, 1 + a * br);
   }
   arteryMat.emissiveMap.offset.x -= dt * 1.2;
-  veinMat.emissiveMap.offset.x -= dt * 0.8;
-  nerveMat.emissiveMap.offset.x -= dt * 2.5;
+  veinMat.emissiveMap.offset.x -= dt * 0.7;
+  nerveMat.emissiveMap.offset.x -= dt * 3;
   updateLive();
 }
 
@@ -1368,7 +1455,9 @@ function frame() {
   updateEntries(dt);
   updateLife(t, dt);
   updateViewOffset(dt);
+  scene.environmentRotation.y = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
   renderer.render(scene, camera);
+  if (glow) renderGlow();
   if (guideOn) {
     if (!$('intro').hidden && presenter.time > 0.5 && !presenter.gestureTime && Math.random() < dt / 5) presenter.play('wave', 2.5);
     placePresenter();
@@ -1378,12 +1467,20 @@ function frame() {
 }
 frame();
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(w, h);
+  if (glow) {
+    const r = renderer.getPixelRatio() / 2;
+    glow.target.setSize(w * r, h * r);
+    glow.bloom.setSize(w * r, h * r);
+  }
   presenter.setSize(presenterEl.clientWidth, presenterEl.clientHeight);
-});
+}
+resize();
+window.addEventListener('resize', resize);
 presenter.play('wave', 3);
 
 // גישה נוחה לבדיקות מהקונסול
