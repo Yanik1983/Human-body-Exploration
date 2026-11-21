@@ -2,9 +2,9 @@
 // (anatomy.js נטען עם אותו מספר גרסה שה־Worker קיבל, כדי שלא יתערבבו קבצים ישנים וחדשים)
 const anatomy = import(`./anatomy.js${self.location.search}`);
 
-self.onmessage = async ({ data: { q } }) => {
+self.onmessage = async ({ data: { q, ids } }) => {
   const { PARTS, buildPart } = await anatomy;
-  for (const part of PARTS) {
+  for (const part of PARTS.filter((p) => ids.includes(p.id))) {
     const meshes = buildPart(part, q);
     self.postMessage({ id: part.id, meshes }, meshes.flatMap((m) => [m.position.buffer, m.normal.buffer, m.color.buffer, m.index.buffer]));
   }

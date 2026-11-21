@@ -610,21 +610,24 @@ function onPart({ id, meshes }) {
     addEntry(mesh, layer, station);
   }
   loadedParts++;
-  $('loading').textContent = `בונים את הגוף… ${Math.round((loadedParts / 12) * 100)}%`;
+  $('loading').textContent = `בונים את הגוף… ${Math.round((loadedParts / WORKER_PARTS.flat().length) * 100)}%`;
 }
 
+// שלושה Workers במקביל (השרירים והשלד הם החלקים הכבדים), כדי שהבנייה תיקח בערך שליש מהזמן.
 // אותו מספר גרסה כמו main.js, כדי שאחרי עדכון ה־Worker לא ייטען מהמטמון הישן
-const worker = new Worker(new URL(`./anatomy-worker.js${new URL(import.meta.url).search}`, import.meta.url), { type: 'module' });
-worker.onmessage = ({ data }) => {
-  if (data.done) {
+const WORKER_PARTS = [['body', 'heart', 'lungs', 'brain', 'stomach', 'liver', 'smallIntestine', 'colon', 'kidneys', 'bladder'], ['skeleton'], ['muscles']];
+let workersLeft = WORKER_PARTS.length;
+for (const ids of WORKER_PARTS) {
+  const worker = new Worker(new URL(`./anatomy-worker.js${new URL(import.meta.url).search}`, import.meta.url), { type: 'module' });
+  worker.onmessage = ({ data }) => {
+    if (!data.done) return onPart(data);
     worker.terminate(); // משחרר את הזיכרון של הבנייה
+    if (--workersLeft) return;
     $('loading').hidden = true;
     addRuntimeParts();
-    return;
-  }
-  onPart(data);
-};
-worker.postMessage({ q: weakDevice || phone() ? 1.3 : 1 });
+  };
+  worker.postMessage({ q: weakDevice || phone() ? 1.3 : 1, ids });
+}
 
 // ---------- שכבות ----------
 const LAYERS = [
@@ -676,7 +679,7 @@ const VIEWS = {
   eyes: { t: [0, 1.64, 0.04], d: 0.42, az: 0.45, layers: ['skin', 'organs'] },
   lungs: { t: [0, 1.29, 0], d: 0.95, az: 0.25, layers: ['skin', 'organs'] },
   heart: { t: [0.015, 1.26, 0.03], d: 0.62, az: 0.35, layers: ['skin', 'organs', 'blood'] },
-  blood: { t: [0, 0.95, 0], d: 3.1, az: 0.3, layers: ['skin', 'blood'] },
+  blood: { t: [0, 0.95, 0], d: 3.1, az: 0.3, layers: ['skin', 'organs', 'blood'] },
   mouth: { t: [0, 1.53, 0.03], d: 0.6, az: 1.1, layers: ['skin', 'organs'] },
   stomach: { t: [0.03, 1.1, 0.03], d: 0.75, az: 0.35, layers: ['skin', 'organs'] },
   liver: { t: [-0.03, 1.12, 0.03], d: 0.75, az: -0.4, layers: ['skin', 'organs'] },
@@ -746,7 +749,7 @@ function updateEntries(dt) {
         m.transparent = transparent;
         m.needsUpdate = true;
       }
-      if (e.layer === 'blood' || e.layer === 'nerves') m.depthWrite = e.cur > 0.5; // צינור מעומעם לא מסתיר את האיברים שמאחוריו
+      m.depthWrite = e.cur > 0.5; // חלק מעומעם (או באמצע מעבר) לא מסתיר את מה שמאחוריו
       m.opacity = e.cur;
       if (m.emissive && !m.emissiveMap) m.emissive.copy(m.color).multiplyScalar(glow);
     }
@@ -1431,20 +1434,23 @@ keepScreenOn();
 // ---------- לולאה ----------
 // כשחלון ההסבר פתוח במחשב, מזיזים את מרכז התמונה הצידה, כדי שהגוף לא יסתתר מאחוריו
 let viewShift = 0;
+let viewShiftY = 0;
 function updateViewOffset(dt) {
   const box = infoBox();
-  let target = 0;
-  if (box && !phone()) {
+  let target = 0, targetY = 0;
+  if (box) {
     const r = box.getBoundingClientRect();
-    const center = window.innerWidth / 2;
-    target = r.left > center ? -(r.width / 2) : r.width / 2; // החלון מימין – מזיזים שמאלה, ולהפך
-    target *= 0.9;
+    // בטלפון החלון בתחתית – מרימים את התמונה; במחשב הוא בצד – מזיזים הצידה
+    if (phone()) targetY = Math.max(0, window.innerHeight - r.top) * 0.45;
+    else target = (r.left > window.innerWidth / 2 ? -(r.width / 2) : r.width / 2) * 0.9;
   }
-  viewShift += (target - viewShift) * (1 - Math.exp(-dt * 5));
+  const k = 1 - Math.exp(-dt * 5);
+  viewShift += (target - viewShift) * k;
+  viewShiftY += (targetY - viewShiftY) * k;
   const w = window.innerWidth, h = window.innerHeight;
   scene.background.offset.x = -viewShift / w; // אור הרקע נשאר מאחורי הגוף
-  if (Math.abs(viewShift) < 0.5) camera.clearViewOffset();
-  else camera.setViewOffset(w, h, -viewShift, 0, w, h);
+  if (Math.abs(viewShift) < 0.5 && viewShiftY < 0.5) camera.clearViewOffset();
+  else camera.setViewOffset(w, h, -viewShift, viewShiftY, w, h);
 }
 
 camera.position.set(0, 1.2, 4);
