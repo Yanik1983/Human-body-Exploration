@@ -102,6 +102,7 @@ const SKIN_GLSL = `uniform float uSolid;
 uniform float uOpacity;
 varying vec3 vPos;
 float eyeM = 0.0, nailM = 0.0;
+vec3 eyeC = vec3(0.0);
 float blob(vec3 p, vec3 c, vec3 r) { vec3 q = (p - c) / r; return exp(-dot(q, q)); }
 float nail(vec3 p, vec3 c, vec3 n, vec3 w) {
   vec3 d = p - c;
@@ -110,41 +111,49 @@ float nail(vec3 p, vec3 c, vec3 n, vec3 w) {
 }
 vec3 skinPaint(vec3 p) {
   vec3 a = vec3(abs(p.x), p.yz);
-  float red = 0.35 * blob(a, vec3(0.047, 1.605, 0.07), vec3(0.02)) + 0.5 * blob(a, vec3(0.0, 1.6, 0.12), vec3(0.012))
+  float red = 0.2 * blob(a, vec3(0.047, 1.605, 0.07), vec3(0.02)) + 0.5 * blob(a, vec3(0.0, 1.6, 0.12), vec3(0.012))
     + 0.6 * blob(a, vec3(0.085, 1.63, -0.03), vec3(0.012, 0.035, 0.025)) + 0.6 * blob(a, vec3(0.1, 0.515, 0.07), vec3(0.03))
     + 0.5 * blob(a, vec3(0.24, 1.13, -0.07), vec3(0.025)) + 0.6 * blob(a, vec3(0.3, 0.78, 0.004), vec3(0.015, 0.045, 0.045))
     + 0.5 * blob(a, vec3(0.11, 0.02, 0.13), vec3(0.045, 0.02, 0.035));
   vec3 c = mix(vec3(1.0), vec3(1.0, 0.75, 0.72), min(red, 1.0));
   c *= 1.0 + 0.03 * sin(p.x * 173.0 + sin(p.y * 61.0) * 2.0) * sin(p.y * 157.0 + p.z * 91.0) * sin(p.z * 137.0 + p.x * 53.0);
-  c = mix(c, vec3(0.86, 0.68, 0.64), smoothstep(0.009, 0.006, length(a.xy - vec2(0.09, 1.29))) * step(0.08, a.z));
-  float t = a.x / 0.024, ml = 1.566 + 0.001 * t * t, front = step(0.085, a.z);
+  c = mix(c, vec3(0.86, 0.68, 0.64), smoothstep(0.009, 0.006, length(a.xy - vec2(0.09, 1.29))) * smoothstep(0.076, 0.084, a.z));
+  float t = a.x / 0.024, ml = 1.566 + 0.001 * t * t, front = smoothstep(0.081, 0.089, a.z);
   float lip = smoothstep(1.0, 0.9, t) * front * smoothstep(-0.0006, 0.0006, ml + 0.0072 * (1.0 - t * t) - 0.0012 * exp(-a.x * a.x / 1.6e-5) - a.y)
     * smoothstep(-0.0006, 0.0006, a.y - ml + 0.0085 * (1.0 - t * t));
-  c = mix(c, vec3(0.78, 0.47, 0.47), 0.8 * lip);
+  c = mix(c, vec3(0.85, 0.55, 0.6), 0.8 * lip);
   c *= 1.0 - 0.6 * smoothstep(1.05, 0.9, t) * smoothstep(0.0011, 0.0, abs(a.y - ml)) * front;
   float bu = (a.x - 0.034) / 0.024;
-  float brow = smoothstep(1.0, 0.7, abs(bu)) * smoothstep(0.0035 - 0.0012 * bu, 0.0, abs(a.y - 1.6575 - 0.003 * (1.0 - bu * bu) + 0.001 * bu)) * step(0.06, a.z);
+  float brow = smoothstep(1.0, 0.7, abs(bu)) * smoothstep(0.0035 - 0.0012 * bu, 0.0, abs(a.y - 1.6575 - 0.003 * (1.0 - bu * bu) + 0.001 * bu)) * smoothstep(0.056, 0.064, a.z);
   c = mix(c, vec3(0.36, 0.25, 0.18), 0.65 * brow);
   vec3 q = a - ${v3(EYES[0].c)};
   float u = q.x / 0.0145, up = 0.0058 * (1.0 - u * u) + 0.001 * u, lo = -0.0042 * (1.0 - u * u) + 0.0006 * u;
   eyeM = smoothstep(-0.0005, 0.0005, up - q.y) * smoothstep(-0.0005, 0.0005, q.y - lo) * step(abs(u), 1.0) * step(0.0, q.z);
   float r = length(normalize(q).xy);
-  vec3 eye = mix(vec3(0.95, 0.92, 0.9), vec3(0.24, 0.45, 0.72) * (0.7 + 0.5 * smoothstep(0.42, 0.2, r)), smoothstep(0.5, 0.47, r));
-  c = mix(c, mix(eye, vec3(0.03), smoothstep(0.2, 0.17, r)), eyeM);
-  c = mix(c, vec3(0.18, 0.11, 0.09), 0.85 * smoothstep(0.0011, 0.0002, abs(q.y - up)) * smoothstep(1.06, 0.95, abs(u)) * step(0.0, q.z));
-  nailM = ${[...FINGERS.map((f) => `nail(a, ${v3([0.299, 0.81 - f.len + 0.0075, f.z])}, vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0068, 0.0052))`),
-    'nail(a, vec3(0.2835, 0.8, 0.0535), vec3(0.857, 0.0, 0.514), vec3(0.0052, 0.0068, 0.0052))',
-    'nail(a, vec3(0.0726, 0.016, 0.142), vec3(0.0, 1.0, 0.0), vec3(0.0065, 1.0, 0.0075))'].join('\n    + ')};
-  return mix(c, vec3(1.25, 1.02, 0.98), nailM);
+  // העין והציפורניים מקבלות צבע משלהן (בגוונים ליניאריים), לא גוון של עור
+  vec3 iris = vec3(0.07, 0.17, 0.36) * (0.7 + 0.5 * smoothstep(0.42, 0.2, r));
+  eyeC = mix(mix(vec3(0.75, 0.72, 0.7), iris, smoothstep(0.5, 0.47, r)), vec3(0.003), smoothstep(0.2, 0.17, r));
+  float lid = 0.85 * smoothstep(0.0011, 0.0002, abs(q.y - up)) * smoothstep(1.06, 0.95, abs(u)) * step(0.0, q.z);
+  c = mix(c, vec3(0.18, 0.11, 0.09), lid);
+  eyeC *= 1.0 - lid;
+  nailM = ${[...FINGERS.map((f) => `nail(a, ${v3([0.299, 0.81 - f.len + 0.0035, f.z])}, vec3(1.0, 0.0, 0.0), vec3(1.0, 0.006, 0.0038))`),
+    'nail(a, vec3(0.2835, 0.8, 0.0535), vec3(0.857, 0.0, 0.514), vec3(0.0042, 0.006, 0.0042))',
+    // הבהונות: אותו קצה כמו ב־limbShapes שב־anatomy.js
+    ...[0, 1, 2, 3, 4].map((t) => {
+      const o = t ? -0.026 + t * 0.013 : -0.024, r = t ? 0.008 : 0.0105;
+      return `nail(a, ${v3([0.105 + o * 1.35, r + 0.003, (t ? 0.152 - t * 0.004 : 0.158) - r - 0.0025])}, vec3(0.0, 1.0, 0.0), ${v3(t ? [0.0035, 1, 0.0035] : [0.0065, 1, 0.0075])})`;
+    })].join('\n    + ')};
+  return c;
 }
 `;
 skinMat.onBeforeCompile = (sh) => {
   Object.assign(sh.uniforms, skinUniforms);
   sh.vertexShader = 'varying vec3 vPos;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPos = position;');
   sh.fragmentShader = SKIN_GLSL + sh.fragmentShader
-    // הצללה בקפלים אדמדמה, כמו אור שעובר דרך העור
-    .replace('#include <color_fragment>', 'diffuseColor.rgb *= skinPaint(vPos) * pow(vColor, vec3(0.7, 1.0, 1.2));')
-    .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.12, eyeM);\nroughnessFactor = mix(roughnessFactor, 0.28, nailM);')
+    // הצללה בקפלים אדמדמה, כמו אור שעובר דרך העור; בזכוכית מדלגים על הציור, כי הוא נבלע
+    .replace('#include <color_fragment>', `vec3 paint = uSolid > 0.001 ? skinPaint(vPos) : vec3(1.0);
+    diffuseColor.rgb = mix(mix(diffuseColor.rgb * paint, vec3(0.7, 0.4, 0.36), nailM), eyeC, eyeM) * pow(vColor, vec3(0.85, 1.0, 1.1));`)
+    .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.12, eyeM);')
     .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.22, 0.07, 0.03) * (1.0 - eyeM);')
     .replace(
       '#include <dithering_fragment>',
