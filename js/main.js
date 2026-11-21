@@ -91,7 +91,7 @@ controls.maxPolarAngle = Math.PI * 0.92;
 controls.autoRotateSpeed = 0.6;
 
 // ---------- חומרים ----------
-// איברים רטובים ומבריקים. הזוהר וה"קטיפה" מוכפלים בצבע של כל נקודה, כדי שאיבר כהה (כמו הכבד) לא ייראה חלבי.
+// איברים פנימיים (wetMat): רטובים ומבריקים. הזוהר וה"קטיפה" מוכפלים בצבע של כל נקודה, כדי שאיבר כהה (כמו הכבד) לא ייראה חלבי.
 // (מחלקה ולא onBeforeCompile על המופע, כי clone() לא מעתיק אותו)
 class OrganMaterial extends THREE.MeshPhysicalMaterial {
   onBeforeCompile(sh) {
@@ -100,7 +100,8 @@ class OrganMaterial extends THREE.MeshPhysicalMaterial {
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#if defined(USE_COLOR) && defined(USE_SHEEN)\nmaterial.sheenColor *= vColor;\n#endif');
   }
 }
-const organMat = (color, extra = {}) => new OrganMaterial({ color, roughness: 0.55, clearcoat: 0.55, clearcoatRoughness: 0.2, sheen: 0.3, sheenColor: new THREE.Color(color).offsetHSL(0, 0, 0.2), ...extra });
+const organMat = (color, extra = {}, M = THREE.MeshPhysicalMaterial) => new M({ color, roughness: 0.42, clearcoat: 0.55, clearcoatRoughness: 0.35, sheen: 0.3, sheenColor: new THREE.Color(color).offsetHSL(0, 0, 0.2), ...extra });
+const wetMat = (color, extra = {}) => organMat(color, { roughness: 0.55, clearcoatRoughness: 0.2, ...extra }, OrganMaterial);
 
 // העור: זכוכית שקופה עם שוליים זוהרים, או עור אמיתי (uSolid = 1) בתחנה של העור
 const skinUniforms = { uSolid: { value: 0 }, uOpacity: { value: 1 } };
@@ -205,7 +206,7 @@ const arteryMat = organMat('#d8262e', { emissive: '#ff4040', emissiveMap: stripe
 const veinMat = organMat('#2f55d4', { emissive: '#6d8dff', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.9 });
 const nerveMat = organMat('#f5c932', { emissive: '#fff2a0', emissiveMap: stripeTexture([[0, '#000'], [0.85, '#000'], [0.93, '#fff'], [1, '#000']]), emissiveIntensity: 1.4 });
 const ringTex = stripeTexture([[0, '#fff'], [0.5, '#fff'], [0.6, '#d49a9a'], [0.9, '#d49a9a'], [1, '#fff']]);
-const tracheaMat = organMat('#f3c9c9', { map: ringTex, bumpMap: ringTex, bumpScale: 3 }); // טבעות הסחוס בולטות
+const tracheaMat = wetMat('#f3c9c9', { map: ringTex, bumpMap: ringTex, bumpScale: 3 }); // טבעות הסחוס בולטות
 
 // ---------- החלקים של הגוף ----------
 // לכל חלק: הרשת, השכבה שלו, התחנה שלו, והשקיפות הנוכחית (שמשתנה בהדרגה)
@@ -253,16 +254,17 @@ function canvasTexture(n, draw) {
 const irisTexture = () => canvasTexture(256, (g, n) => {
   const c = n / 2;
   const grad = g.createRadialGradient(c, c, 0, c, c, c);
-  grad.addColorStop(0.3, '#8a5a24');
-  grad.addColorStop(0.48, '#b07a35');
-  grad.addColorStop(0.62, '#4d7c8a');
-  grad.addColorStop(0.9, '#3d6b86');
-  grad.addColorStop(1, '#1a2a38');
+  grad.addColorStop(0.32, '#6e5a34');
+  grad.addColorStop(0.38, '#a87c3c');
+  grad.addColorStop(0.45, '#3a74ac');
+  grad.addColorStop(0.85, '#2f6fa8');
+  grad.addColorStop(0.95, '#285f95');
+  grad.addColorStop(1, '#13253a');
   g.fillStyle = grad;
   g.fillRect(0, 0, n, n);
   for (let i = 0; i < 420; i++) {
     const a = Math.random() * Math.PI * 2, r0 = c * (0.32 + Math.random() * 0.1), r1 = c * (0.7 + Math.random() * 0.3);
-    g.strokeStyle = Math.random() < 0.5 ? `rgba(225,215,190,${0.08 + Math.random() * 0.18})` : `rgba(20,30,40,${0.1 + Math.random() * 0.2})`;
+    g.strokeStyle = Math.random() < 0.5 ? `rgba(175,215,245,${0.08 + Math.random() * 0.18})` : `rgba(20,30,40,${0.1 + Math.random() * 0.2})`;
     g.lineWidth = 0.6 + Math.random() * 1.4;
     g.beginPath();
     g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
@@ -276,11 +278,11 @@ const irisTexture = () => canvasTexture(256, (g, n) => {
     g.ellipse(c + Math.cos(a) * r, c + Math.sin(a) * r, 2 + Math.random() * 4, 1.5, a, 0, 7);
     g.fill();
   }
-  g.strokeStyle = 'rgba(235,205,150,0.55)';
-  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(225,190,120,0.45)';
+  g.lineWidth = 2;
   g.beginPath();
   for (let i = 0; i <= 64; i++) {
-    const a = (i / 64) * Math.PI * 2, r = c * (0.47 + 0.03 * Math.sin(i * 1.7));
+    const a = (i / 64) * Math.PI * 2, r = c * (0.41 + 0.02 * Math.sin(i * 1.7));
     g.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
   }
   g.stroke();
@@ -294,13 +296,13 @@ const irisTexture = () => canvasTexture(256, (g, n) => {
 function buildEyes() {
   const g = new THREE.Group();
   const cap = 0.5; // הזווית של פתח הלובן, שבו יושבות הקשתית והקרנית
-  const white = organMat('#f4f0e8', { roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 });
+  const white = wetMat('#f4f0e8', { roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 });
   // הקשתית זוהרת מעט בצבעים של עצמה (emissiveMap), וכך גם ההדגשה של התחנה לא מלבינה אותה
   const tex = irisTexture();
-  const iris = organMat('#ffffff', { map: tex, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.12, roughness: 0.6, clearcoat: 0, sheen: 0 });
+  const iris = wetMat('#ffffff', { map: tex, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.12, roughness: 0.6, clearcoat: 0, sheen: 0 });
   // הקרנית מוסיפה רק השתקפויות (חיבור צבעים), כך שהקשתית נראית דרכה גם כשהעין אטומה
-  const cornea = new THREE.MeshPhysicalMaterial({ color: '#000000', roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, blending: THREE.AdditiveBlending, depthWrite: false });
-  const nerve = organMat('#eddcbc', { clearcoat: 0.4 });
+  const cornea = new THREE.MeshPhysicalMaterial({ color: '#000000', roughness: 0.05, specularIntensity: 0.4, clearcoat: 1, clearcoatRoughness: 0.02, blending: THREE.AdditiveBlending, depthWrite: false });
+  const nerve = wetMat('#eddcbc', { clearcoat: 0.4 });
   for (const e of EYES) {
     const s = Math.sign(e.c[0]);
     const ball = new THREE.Group();
@@ -313,7 +315,7 @@ function buildEyes() {
     cor.position.z = e.r * Math.cos(cap) - Math.sqrt(rc * rc - (e.r * Math.sin(cap)) ** 2);
     cor.renderOrder = 1;
     ball.add(sclera, ir, cor);
-    const on = new THREE.Mesh(tubeGeometry([[e.c[0] - s * 0.003, e.c[1], e.c[2] - e.r * 0.9], [s * 0.022, 1.643, 0.036], [s * 0.012, 1.645, 0.02]], 0.0022), nerve);
+    const on = new THREE.Mesh(tubeGeometry([[e.c[0] - s * 0.003, e.c[1], e.c[2] - e.r * 0.9], [s * 0.022, 1.643, 0.036], [s * 0.012, 1.645, 0.02], [0, 1.646, 0.012], [-s * 0.016, 1.648, 0.0]], 0.0022), nerve); // שני העצבים מצטלבים (ההצטלבות) וממשיכים למוח
     g.add(ball, on);
   }
   return g;
@@ -386,9 +388,9 @@ function buildMouth() {
     geo.computeVertexNormals();
     gums.push(geo);
   }
-  const toothMat = organMat('#f6f1e2', { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0 });
-  const gumMat = organMat('#e8959b', { roughness: 0.5, side: THREE.DoubleSide });
-  const tongue = new THREE.Mesh(tongueGeometry(), organMat('#d9737d', { roughness: 0.65, clearcoat: 0.6, bumpMap: papillae(), bumpScale: 2 }));
+  const toothMat = wetMat('#f6f1e2', { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0 });
+  const gumMat = wetMat('#e8959b', { roughness: 0.5, side: THREE.DoubleSide });
+  const tongue = new THREE.Mesh(tongueGeometry(), wetMat('#d9737d', { roughness: 0.65, clearcoat: 0.6, bumpMap: papillae(), bumpScale: 2 }));
   tongue.position.set(0, 1.55, 0.034);
   return [new THREE.Mesh(mergeGeometries(teeth), toothMat), new THREE.Mesh(mergeGeometries(gums), gumMat), tongue];
 }
@@ -403,7 +405,7 @@ function tongueGeometry() {
     x *= 1 - 0.35 * front * front;
     if (y > 0) y = y * 0.75 - 0.22 * Math.exp(-((x / 0.15) ** 2)) * y * (0.4 + 0.6 * front);
     else y *= 0.6;
-    p.setXYZ(i, x * 0.019, y * 0.009 - 0.008 * Math.min(0, z) ** 2, z * 0.032); // השורש של הלשון יורד אל הגרון
+    p.setXYZ(i, x * 0.019, y * 0.009 - 0.005 * Math.min(0, z) ** 2, z * (z < 0 ? 0.02 : 0.032)); // השורש קצר, עגול ויורד מעט אל הגרון, בלי חוד
   }
   geo.computeVertexNormals();
   return geo;
@@ -427,7 +429,7 @@ function buildGallbladder() {
   const geo = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 24);
   const fundus = V(GALLBLADDER.c).add(V([-0.002, -0.006, 0.006]));
   const neck = V(GALLBLADDER.c).add(V([0.004, 0.016, -0.03]));
-  const mesh = new THREE.Mesh(geo, organMat('#5d8f3e', { clearcoat: 1, clearcoatRoughness: 0.1 }));
+  const mesh = new THREE.Mesh(geo, wetMat('#5d8f3e', { clearcoat: 1, clearcoatRoughness: 0.1 }));
   mesh.position.copy(fundus);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), neck.sub(fundus).normalize());
   return mesh;
@@ -436,13 +438,13 @@ function buildGallbladder() {
 function addRuntimeParts() {
   addEntry(buildEyes(), 'organs', 'eyes');
   for (const m of buildMouth()) addEntry(m, 'organs', 'mouth');
-  addEntry(new THREE.Mesh(tubeGeometry(ESOPHAGUS, 0.0075), organMat('#e9a3a0')), 'organs', 'mouth');
-  // הסימפונות של האונות העליונות מתקרבים לאמצע, כי קודקוד הריאה צר (כדי שלא יבלטו מחוץ לריאה)
+  addEntry(new THREE.Mesh(tubeGeometry(ESOPHAGUS, 0.0075), wetMat('#e9a3a0')), 'organs', 'mouth');
+  // הסימפונות של האונות העליונות מתקרבים לאמצע, כי קודקוד הריאה יושב בתוך הצלע הראשונה הצרה (כדי שלא יבלטו מחוץ לריאה)
   const bronchi = BRONCHI.map((b) => b.map(([x, y, z]) => [x * (1 - 6 * Math.max(0, y - 1.33)), y, z]));
   addEntry(new THREE.Mesh(mergeGeometries([tubeGeometry(TRACHEA, 0.0085, 0.008), tubes(bronchi, 0.005, 0.008)]), tracheaMat), 'organs', 'lungs');
   addEntry(buildGallbladder(), 'organs', 'liver');
   const ureters = KIDNEYS.map((k) => [k.hilum, [k.s * 0.04, 0.98, -0.03], [k.s * 0.03, 0.91, 0.015], [k.s * 0.014, 0.885, 0.025]]);
-  addEntry(new THREE.Mesh(tubes(ureters, 0.0025), organMat('#ead3a0')), 'organs', 'kidneys');
+  addEntry(new THREE.Mesh(tubes(ureters, 0.0025), wetMat('#ead3a0')), 'organs', 'kidneys');
   addEntry(new THREE.Mesh(tubes(ARTERIES, (i) => (i === 0 ? 0.009 : i > 6 ? 0.003 : 0.0045)), arteryMat), 'blood', 'blood');
   addEntry(new THREE.Mesh(tubes(VEINS, (i) => (i < 2 ? 0.0095 : 0.005)), veinMat), 'blood', 'blood');
   addEntry(new THREE.Mesh(mergeGeometries([tubeGeometry(SPINAL_CORD, 0.0065, 0.08), tubes(NERVES, (i, pts) => (pts.length <= 3 ? 0.0015 : 0.0026), 0.08)]), nerveMat), 'nerves', 'nerves');
@@ -494,7 +496,7 @@ function onPart({ id, meshes }) {
     }
   } else {
     const [layer, station, color] = PART_INFO[id];
-    const material = id === 'skeleton' ? organMat(color, { roughness: 0.6, clearcoat: 0.15, sheen: 0 }) : organMat(color);
+    const material = id === 'skeleton' ? organMat(color, { roughness: 0.6, clearcoat: 0.15, sheen: 0 }) : wetMat(color);
     const geos = meshes.map((m) => meshFrom(m, material).geometry);
     material.vertexColors = true; // רק לחלקים מ־anatomy.js יש צבע לכל נקודה
     let mesh = new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos) : geos[0], material);
