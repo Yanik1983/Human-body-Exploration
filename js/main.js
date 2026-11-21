@@ -496,7 +496,8 @@ function onPart({ id, meshes }) {
     }
   } else {
     const [layer, station, color] = PART_INFO[id];
-    const material = id === 'skeleton' ? organMat(color, { roughness: 0.6, clearcoat: 0.15, sheen: 0 }) : wetMat(color);
+    // לשלד חומר לבן: הגוון (שנהב, סחוס כחלחל, שיניים) מגיע מהצבע של כל נקודה, ונראה כמו עצם מט ולא מבריק
+    const material = id === 'skeleton' ? organMat('#fff', { roughness: 0.58, clearcoat: 0.12, clearcoatRoughness: 0.6, sheen: 0.25, sheenColor: new THREE.Color('#fff2dc') }) : wetMat(color);
     const geos = meshes.map((m) => meshFrom(m, material).geometry);
     material.vertexColors = true; // רק לחלקים מ־anatomy.js יש צבע לכל נקודה
     let mesh = new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos) : geos[0], material);
