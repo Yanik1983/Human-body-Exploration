@@ -175,15 +175,31 @@ skinMat.onBeforeCompile = (sh) => {
     );
 };
 
-// השרירים: אדום עם סיבים דקים
-const muscleMat = organMat('#b5332d', { clearcoat: 0.3, sheen: 0.5, vertexColors: true });
+// השרירים: הצבע של כל נקודה מקודד (anatomy.js, fiberCode): r = הצללה, g ו־b = כיוון הסיבים, או לבן = גיד
+const muscleMat = organMat('#92231b', { clearcoat: 0.35, clearcoatRoughness: 0.4, sheen: 0.25, vertexColors: true });
 muscleMat.onBeforeCompile = (sh) => {
-  sh.vertexShader = 'varying vec3 vPos;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPos = position;');
-  sh.fragmentShader = 'varying vec3 vPos;\n' + sh.fragmentShader.replace(
+  sh.vertexShader = 'varying vec3 vPos;\nvarying vec3 vObjN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPos = position;\nvObjN = normal;');
+  sh.fragmentShader = `varying vec3 vPos;
+varying vec3 vObjN;
+// פסים לאורך הסיבים: מישורים מקבילים לכיוון הסיב; נעלמים כשהם צפופים מפיקסל או כמעט מקבילים לפני השטח
+float fiber(vec3 a, vec3 n, float k) {
+  float ph = dot(vPos, a) * k;
+  return (1.0 - dot(n, a) * dot(n, a)) * (1.0 - smoothstep(0.7, 1.8, fwidth(ph))) * cos(ph); // cos: אותו פס גם כשכיוון הסיב מתהפך
+}
+` + sh.fragmentShader.replace(
     '#include <color_fragment>',
-    `#include <color_fragment>
-    float fib = sin(vPos.x * 700.0 + sin(vPos.y * 40.0) * 6.0) * sin(vPos.z * 650.0 + vPos.y * 30.0);
-    diffuseColor.rgb *= 0.82 + 0.18 * smoothstep(-0.6, 0.9, fib);`,
+    `float ao = max(vColor.r, 0.02);
+    vec2 code = vColor.gb / ao;
+    float tendon = smoothstep(0.45, 1.0, min(code.x, code.y));
+    vec2 q = clamp(floor((code - 0.045) / 0.045 + 0.5), 0.0, 14.0) / 7.0 - 1.0;
+    vec3 d = normalize(vec3(q.x, -sqrt(max(0.0, 1.0 - dot(q, q))), q.y));
+    vec3 u = normalize(cross(d, abs(d.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 v = cross(d, u);
+    vec3 n = normalize(vObjN);
+    float fib = (0.6 * (fiber(u, n, 1600.0) + fiber(v, n, 1800.0)) + 0.4 * (fiber(u, n, 430.0) + fiber(v, n, 470.0))) * step(dot(q, q), 1.5); // ‎|q|>1: השכבה העמוקה, בלי סיבים
+    fib *= 1.0 - smoothstep(0.015, 0.05, fwidth(code.x) + fwidth(code.y)); // במעבר בין שני כיוונים הפסים משתבשים
+    float shade = 0.88 + 0.24 * fract(sin(dot(abs(q), vec2(12.99, 78.23))) * 43758.5);
+    diffuseColor.rgb = mix(diffuseColor.rgb * shade * (1.0 + 0.2 * fib), vec3(0.88, 0.83, 0.79), tendon) * ao;`,
   );
 };
 
@@ -486,13 +502,13 @@ function pivoted(mesh, center) {
 
 let loadedParts = 0;
 function onPart({ id, meshes }) {
-  if (id === 'body') {
+  if (id === 'body' || id === 'muscles') {
     for (const m of meshes) {
       if (m.layer === 'skin') {
         const mesh = meshFrom(m, skinMat);
         mesh.renderOrder = 10;
         addEntry(mesh, 'skin', 'skin');
-      } else addEntry(meshFrom(m, muscleMat), 'muscles', 'muscles');
+      } else addEntry(meshFrom(m, muscleMat), 'muscles', 'muscles').mats[0].onBeforeCompile = muscleMat.onBeforeCompile; // השכפול לא שומר את onBeforeCompile
     }
   } else {
     const [layer, station, color] = PART_INFO[id];
@@ -506,7 +522,7 @@ function onPart({ id, meshes }) {
     addEntry(mesh, layer, station);
   }
   loadedParts++;
-  $('loading').textContent = `בונים את הגוף… ${Math.round((loadedParts / 11) * 100)}%`;
+  $('loading').textContent = `בונים את הגוף… ${Math.round((loadedParts / 12) * 100)}%`;
 }
 
 // אותו מספר גרסה כמו main.js, כדי שאחרי עדכון ה־Worker לא ייטען מהמטמון הישן
