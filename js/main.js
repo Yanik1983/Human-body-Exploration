@@ -115,7 +115,7 @@ scene.add(camera);
 const aim = new THREE.Object3D();
 aim.position.z = -2;
 camera.add(aim);
-for (const [color, intensity, pos] of [['#fff1e2', 2.7, [1.5, 2, 1]], ['#bcd9ff', 0.5, [-2.5, 0, 0.5]], ['#8fd3ff', 1.9, [-2, 1.2, -4.5]], ['#ffd9c4', 1.0, [2.2, 0.6, -4.5]]]) {
+for (const [color, intensity, pos] of [['#fff1e2', 2.7, [1.5, 2, 1]], ['#bcd9ff', 0.5, [-2.5, 0, 0.5]], ['#b8e2ff', 1.2, [-2, 1.2, -4.5]], ['#ffd9c4', 1.0, [2.2, 0.6, -4.5]]]) {
   const light = new THREE.DirectionalLight(color, intensity);
   light.position.set(...pos);
   light.target = aim;
@@ -126,6 +126,7 @@ for (const [color, intensity, pos] of [['#fff1e2', 2.7, [1.5, 2, 1]], ['#bcd9ff'
 let glow = null;
 if (highQuality) {
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1, 0.2, 0);
+  bloom.blendMaterial.visible = false; // את ההילה מוסיפים בעצמנו, אז מדלגים על המיזוג שלו
   glow = {
     scene: new THREE.Scene(),
     target: new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }),
@@ -290,7 +291,7 @@ function stripeTexture(stops) {
 const flowStops = [[0, '#000'], [0.5, '#000'], [0.9, '#fff'], [1, '#000']];
 const arteryMat = organMat('#a8101c', { roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.2, emissive: '#ff3326', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.25 });
 const veinMat = organMat('#2443a8', { roughness: 0.35, clearcoat: 0.8, clearcoatRoughness: 0.2, emissive: '#5f7fff', emissiveMap: stripeTexture(flowStops), emissiveIntensity: 0.25 });
-const nerveMat = organMat('#e6b52e', { roughness: 0.4, emissive: '#fff0a0', emissiveMap: stripeTexture([[0, '#121212'], [0.86, '#121212'], [0.94, '#fff'], [1, '#121212']]), emissiveIntensity: 1.3 });
+const nerveMat = organMat('#e6b52e', { roughness: 0.4, emissive: '#fff0a0', emissiveMap: stripeTexture([[0, '#121212'], [0.86, '#121212'], [0.94, '#fff'], [1, '#121212']]), emissiveIntensity: 1.0 });
 const ringTex = stripeTexture([[0, '#fff'], [0.5, '#fff'], [0.6, '#d49a9a'], [0.9, '#d49a9a'], [1, '#fff']]);
 const tracheaMat = wetMat('#f3c9c9', { map: ringTex, bumpMap: ringTex, bumpScale: 3 }); // טבעות הסחוס בולטות
 
@@ -550,7 +551,7 @@ function addRuntimeParts() {
   addGlow(addEntry(new THREE.Mesh(tubes(ARTERIES, 0.001), arteryMat), 'blood', 'blood'), new THREE.Color('#ff2a1c').multiplyScalar(0.3), arteryMat.emissiveMap);
   addGlow(addEntry(new THREE.Mesh(tubes(VEINS, 0.001), veinMat), 'blood', 'blood'), new THREE.Color('#3f62ff').multiplyScalar(0.3), veinMat.emissiveMap);
   const nerves = mergeGeometries([tubeGeometry(SPINAL_CORD, 0, 0.12), tubes(NERVES, 0.0009, 0.12)]);
-  addGlow(addEntry(new THREE.Mesh(nerves, nerveMat), 'nerves', 'nerves'), new THREE.Color('#ffd23a').multiplyScalar(0.8), nerveMat.emissiveMap);
+  addGlow(addEntry(new THREE.Mesh(nerves, nerveMat), 'nerves', 'nerves'), new THREE.Color('#ffd23a').multiplyScalar(0.4), nerveMat.emissiveMap);
 }
 
 // החלקים שנבנים ב־Worker (anatomy.js)
@@ -745,6 +746,7 @@ function updateEntries(dt) {
         m.transparent = transparent;
         m.needsUpdate = true;
       }
+      if (e.layer === 'blood' || e.layer === 'nerves') m.depthWrite = e.cur > 0.5; // צינור מעומעם לא מסתיר את האיברים שמאחוריו
       m.opacity = e.cur;
       if (m.emissive && !m.emissiveMap) m.emissive.copy(m.color).multiplyScalar(glow);
     }
@@ -1440,6 +1442,7 @@ function updateViewOffset(dt) {
   }
   viewShift += (target - viewShift) * (1 - Math.exp(-dt * 5));
   const w = window.innerWidth, h = window.innerHeight;
+  scene.background.offset.x = -viewShift / w; // אור הרקע נשאר מאחורי הגוף
   if (Math.abs(viewShift) < 0.5) camera.clearViewOffset();
   else camera.setViewOffset(w, h, -viewShift, 0, w, h);
 }
@@ -1474,8 +1477,8 @@ function resize() {
   renderer.setSize(w, h);
   if (glow) {
     const r = renderer.getPixelRatio() / 2;
-    glow.target.setSize(w * r, h * r);
-    glow.bloom.setSize(w * r, h * r);
+    glow.target.setSize(Math.round(w * r), Math.round(h * r));
+    glow.bloom.setSize(Math.round(w * r), Math.round(h * r));
   }
   presenter.setSize(presenterEl.clientWidth, presenterEl.clientHeight);
 }
