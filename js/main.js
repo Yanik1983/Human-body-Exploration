@@ -198,7 +198,7 @@ float fiber(vec3 a, vec3 n, float k) {
     vec3 n = normalize(vObjN);
     float fib = (0.6 * (fiber(u, n, 1600.0) + fiber(v, n, 1800.0)) + 0.4 * (fiber(u, n, 430.0) + fiber(v, n, 470.0))) * step(dot(q, q), 1.5); // ‎|q|>1: השכבה העמוקה, בלי סיבים
     fib *= 1.0 - smoothstep(0.015, 0.05, fwidth(code.x) + fwidth(code.y)); // במעבר בין שני כיוונים הפסים משתבשים
-    float shade = 0.88 + 0.24 * fract(sin(dot(abs(q), vec2(12.99, 78.23))) * 43758.5);
+    float shade = 0.94 + 0.12 * fract(sin(dot(abs(q), vec2(12.99, 78.23))) * 43758.5);
     diffuseColor.rgb = mix(diffuseColor.rgb * shade * (1.0 + 0.2 * fib), vec3(0.88, 0.83, 0.79), tendon) * ao;`,
   );
 };
@@ -529,6 +529,7 @@ function onPart({ id, meshes }) {
 const worker = new Worker(new URL(`./anatomy-worker.js${new URL(import.meta.url).search}`, import.meta.url), { type: 'module' });
 worker.onmessage = ({ data }) => {
   if (data.done) {
+    worker.terminate(); // משחרר את הזיכרון של הבנייה
     $('loading').hidden = true;
     addRuntimeParts();
     return;
