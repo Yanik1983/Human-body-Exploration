@@ -3,9 +3,10 @@
 // ואחר כך שיטת Surface Nets הופכת את השדה לרשת של משולשים.
 // הקובץ רץ ב־Web Worker (anatomy-worker.js), כדי שהדף לא ייתקע בזמן הבנייה.
 
-import {
+// עם אותו מספר גרסה כמו הקובץ הזה, כדי שאחרי עדכון לא יתערבב body-plan.js ישן מהמטמון
+const {
   JOINT, FINGERS, VERTEBRAE, spineZ, HEAD, EYES, BRAIN, HEART, STOMACH, DUODENUM, COLON, KIDNEYS, BLADDER, LIVER, GALLBLADDER,
-} from './body-plan.js';
+} = await import(`./body-plan.js${new URL(import.meta.url).search}`);
 
 // ---------- מתמטיקה ----------
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);

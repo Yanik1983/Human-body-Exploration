@@ -619,13 +619,14 @@ const WORKER_PARTS = [['body', 'heart', 'lungs', 'brain', 'stomach', 'liver', 's
 let workersLeft = WORKER_PARTS.length;
 for (const ids of WORKER_PARTS) {
   const worker = new Worker(new URL(`./anatomy-worker.js${new URL(import.meta.url).search}`, import.meta.url), { type: 'module' });
-  worker.onmessage = ({ data }) => {
-    if (!data.done) return onPart(data);
+  const finish = () => {
     worker.terminate(); // משחרר את הזיכרון של הבנייה
     if (--workersLeft) return;
     $('loading').hidden = true;
     addRuntimeParts();
   };
+  worker.onmessage = ({ data }) => (data.done ? finish() : onPart(data));
+  worker.onerror = finish; // גם אם חלק נכשל, שאר הגוף מוצג והטעינה לא נתקעת
   worker.postMessage({ q: weakDevice || phone() ? 1.3 : 1, ids });
 }
 
