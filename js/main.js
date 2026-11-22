@@ -746,6 +746,7 @@ function updateTween() {
   const r = Math.exp(Math.log(tween.fromS.radius) + (Math.log(tween.toS.radius) - Math.log(tween.fromS.radius)) * e);
   const s = new THREE.Spherical(r, tween.fromS.phi + (tween.toS.phi - tween.fromS.phi) * e, tween.fromS.theta + (tween.toS.theta - tween.fromS.theta) * e);
   camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(s));
+  camera.lookAt(controls.target); // בלי זה המצלמה זזה בלי להסתובב, הגוף יוצא מהתמונה, ובסוף הטיסה היא "קופצת" אליו
   if (k >= 1) tween = null;
 }
 
