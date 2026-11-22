@@ -303,7 +303,7 @@ const animated = {};
 
 function addEntry(obj, layer, station, { pick = true } = {}) {
   // לכל חלק עותק משלו של החומרים, כדי שאפשר יהיה לשנות לו את השקיפות לבד
-  const e = { mesh: obj, layer, station, cur: 0, mats: [] };
+  const e = { mesh: obj, layer, station, cur: 0, hl: 0, mats: [] }; // hl = כמה החלק מודגש עכשיו
   obj.traverse((o) => {
     if (!o.isMesh) return;
     if (o.material !== skinMat) o.material = o.material.clone();
@@ -624,10 +624,25 @@ for (const ids of WORKER_PARTS) {
     if (--workersLeft) return;
     $('loading').hidden = true;
     addRuntimeParts();
+    warmUp();
   };
   worker.onmessage = ({ data }) => (data.done ? finish() : onPart(data));
   worker.onerror = finish; // גם אם חלק נכשל, שאר הגוף מוצג והטעינה לא נתקעת
   worker.postMessage({ q: weakDevice || phone() ? 1.3 : 1, ids });
+}
+
+// מכינים מראש את כל ה־shaders: אחרת כל חלק שמופיע בפעם הראשונה עוצר את התמונה לרגע, באמצע המעבר בין התחנות
+function warmUp() {
+  const hidden = entries.filter((e) => !e.mesh.visible);
+  hidden.forEach((e) => (e.mesh.visible = true));
+  // לכל חלק שתי גרסאות: אטומה, ושקופה (בזמן מעבר). updateEntries מחזיר כל חומר למצב הנכון בפריים הבא
+  const mats = entries.filter((e) => e.layer !== 'skin').flatMap((e) => e.mats);
+  for (const transparent of [true, false]) {
+    mats.forEach((m) => { m.transparent = transparent; m.needsUpdate = true; });
+    renderer.compileAsync(scene, camera).catch(() => {});
+  }
+  if (glow) renderGlow(); // גם הזוהר: השקיפות של החלקים המוסתרים היא 0, כך שלא מצטייר כלום
+  hidden.forEach((e) => (e.mesh.visible = false));
 }
 
 // ---------- שכבות ----------
@@ -706,6 +721,10 @@ function viewDistance(d) {
 }
 
 function flyTo(view, duration = 1.4) {
+  // התנופה שנשארה מגרירה קודמת מוחלת עכשיו, ולא אחרי הטיסה (אז המצלמה הייתה ממשיכה לזוז לבד)
+  controls.enableDamping = false;
+  controls.update();
+  controls.enableDamping = true;
   const t = V(view.t);
   const d = viewDistance(view.d);
   const off = new THREE.Vector3(Math.sin(view.az) * Math.cos(0.12), Math.sin(0.12), Math.cos(view.az) * Math.cos(0.12)).multiplyScalar(d);
@@ -740,7 +759,7 @@ function focusStation(id) {
 
 // השקיפות של כל חלק נקבעת לפי השכבות והתחנה, ומשתנה בהדרגה
 function updateEntries(dt) {
-  const k = 1 - Math.exp(-dt * 6);
+  const k = 1 - Math.exp(-dt * 3.5);
   const skinOn = layersOn.has('skin');
   for (const e of entries) {
     // עור אמיתי מכסה (ומסתיר) את השכבות שבפנים. כשהוא כבוי נשארת זכוכית שקופה, אלא אם השרירים כבר מראים את צורת הגוף
@@ -749,11 +768,12 @@ function updateEntries(dt) {
     if (target && focus && e.station !== focus && e.layer !== 'skin') target = e.layer === 'organs' ? 0.22 : 0.18;
     e.cur += (target - e.cur) * k;
     if (Math.abs(target - e.cur) < 0.002) e.cur = target;
+    e.hl += ((focus && e.station === focus ? 1 : 0) - e.hl) * k;
     e.mesh.visible = e.cur > 0.01;
     if (e.layer === 'skin') continue;
     const transparent = e.cur < 0.99;
     // הדגשה עדינה של מה שמסבירים עכשיו
-    const glow = focus && e.station === focus ? 0.12 + 0.08 * Math.sin(performance.now() / 300) : 0;
+    const glow = e.hl * (0.12 + 0.08 * Math.sin(performance.now() / 300));
     for (const m of e.mats) {
       if (m.transparent !== transparent) {
         m.transparent = transparent;
@@ -776,8 +796,10 @@ function updateEntries(dt) {
 const BPM = 90; // בערך הדופק של ילד
 const BREATHS = 20;
 const startTime = performance.now();
+const boost = { heart: 1, lungs: 1 };
 function updateLife(t, dt) {
-  const focusBoost = (id) => (focus === id ? 1.8 : 1);
+  for (const id in boost) boost[id] += ((focus === id ? 1.8 : 1) - boost[id]) * (1 - Math.exp(-dt * 2));
+  const focusBoost = (id) => boost[id];
   if (animated.heart) {
     const ph = (t * BPM) / 60 % 1;
     const beat = Math.exp(-((ph - 0.08) ** 2) / 0.002) + 0.5 * Math.exp(-((ph - 0.3) ** 2) / 0.003);
@@ -1504,4 +1526,4 @@ window.addEventListener('resize', resize);
 presenter.play('wave', 3);
 
 // גישה נוחה לבדיקות מהקונסול
-window.body = { entries, narrator, presenter, showStation, focusStation };
+window.body = { entries, narrator, presenter, showStation, focusStation, renderer };
